@@ -154,6 +154,17 @@ def run_episode(
             history = encode_history_steps(game)
             valid = env.get_valid_actions()
 
+            # Forced-pass shortcut: if PASS is the only legal action there is no
+            # decision to make — skip MCTS (saves compute) and DON'T collect a
+            # training sample (a pass-only state teaches the policy nothing).
+            va = np.flatnonzero(valid)
+            if va.size == 0 or (va.size == 1 and int(va[0]) == PASS_IDX):
+                rewards, done = env.step(PASS_IDX)
+                if done:
+                    terminal_rewards = np.asarray(rewards, dtype=np.float64).reshape(4)
+                    break
+                continue
+
             if bc_mode:
                 action = _heuristic_action(env)
                 visits = np.zeros(env.ACTION_SIZE, dtype=np.float32)
