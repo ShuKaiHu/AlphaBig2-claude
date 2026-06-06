@@ -5,14 +5,17 @@ import numpy as np
 import gameLogic
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
-# Tier-A card-dominance features are OPT-IN via env var so the live +7.1 deploy
-# (trained without them) keeps its exact input dim. A v5 model trained with
-# BIG2_DOMINANCE=1 must also be RUN with it set; default off = byte-identical.
+# Tier-A card-dominance features are now BAKED IN (always on) — part of the model
+# structure, not an external toggle. STATIC_DIM is permanently 306. (The old
+# pre-dominance +7.1 baseline is 302-dim and must be loaded with an older
+# checkout; it lives in checkpoints/saved/baseline_v7.1.pt for reference.)
+# The BIG2_DOMINANCE env var is kept only as an escape hatch: set it to "0" to
+# fall back to 302-dim if you ever need to load that legacy baseline.
 import os as _os
-DOMINANCE_ON = _os.environ.get("BIG2_DOMINANCE") == "1"
+DOMINANCE_ON = _os.environ.get("BIG2_DOMINANCE") != "0"   # default ON
 _DOMINANCE_DIM = 4 if DOMINANCE_ON else 0
 
-STATIC_DIM = 302 + _DOMINANCE_DIM   # static game-state features
+STATIC_DIM = 302 + _DOMINANCE_DIM   # static game-state features (306 with dominance)
 HIST_STEP_DIM = 29    # per-step history encoding
 HISTORY_LEN = 196     # theoretical max game length (49 plays × 4 steps/play)
 GRU_HIDDEN = 128      # GRU output dimension

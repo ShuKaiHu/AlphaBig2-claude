@@ -43,6 +43,11 @@ def train(
                                 # A positive bonus drove entropy runaway here.
     policy_target_temp: float = 0.7,  # <1 sharpens MCTS visit targets to counter
                                       # the high variance of few-sim visit counts.
+    value_coef: float = 1.0,   # weight on the value MSE. The raw v_loss (~0.02)
+                               # is dwarfed by p_loss (~2.7), so value gets <1%
+                               # of the gradient and stays weak/under-confident.
+                               # Up-weighting (e.g. 3-5) gives the value head more
+                               # learning signal.
     belief_coef: float = 0.1,  # weight on the opponent-hand belief auxiliary loss.
                                # Raise it to make the belief head genuinely
                                # predictive (needed for belief-guided
@@ -177,7 +182,7 @@ def train(
             # entropy_coef defaults to 0 (no bonus): a positive bonus actively
             # inflated entropy here and caused runaway. Exploration comes from
             # MCTS root Dirichlet noise instead.
-            loss = p_loss + v_loss + belief_coef * b_loss - entropy_coef * entropy
+            loss = p_loss + value_coef * v_loss + belief_coef * b_loss - entropy_coef * entropy
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -268,6 +273,8 @@ def _parse_args():
                    help="Entropy BONUS weight (0=off; positive values can cause runaway)")
     p.add_argument("--policy-temp", type=float, default=0.7, dest="policy_target_temp",
                    help="Temperature (<1 sharpens) applied to MCTS visit policy targets")
+    p.add_argument("--value-coef", type=float, default=1.0, dest="value_coef",
+                   help="Weight on value MSE (raise, e.g. 3-5, to train the value head harder)")
     p.add_argument("--belief-coef", type=float, default=0.1, dest="belief_coef",
                    help="Weight on belief auxiliary loss (raise to make belief predictive)")
     p.add_argument("--league", action="store_true", dest="league",
@@ -302,6 +309,7 @@ if __name__ == "__main__":
         bc_mix_ratio=args.bc_mix_ratio,
         entropy_coef=args.entropy_coef,
         policy_target_temp=args.policy_target_temp,
+        value_coef=args.value_coef,
         belief_coef=args.belief_coef,
         league=args.league,
         league_ratio=args.league_ratio,
