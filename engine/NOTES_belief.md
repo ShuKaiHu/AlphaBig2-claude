@@ -169,3 +169,33 @@ heuristic 對手出牌可預測、pass 資訊量低 → determinization/void 對
 → 支持「general 強度天花板」診斷, 而非「可修復的戰術 bug」。
 → 含意: 從線上資料「找弱點」payoff 可能有限 — 輸是因為被輾壓, 不是 exploitable bug。
    真正的槓桿仍是「把網路練更強」(需算力投入), 或接受競爭級但非壓制的結果。
+
+## V7 失敗實驗 (2026-06-07): value-coef=3 適得其反
+
+**動機**: 診斷發現 v_loss(~0.02)被 p_loss(~2.7)淹沒, value 拿到 <1% 梯度。
+假設「放大 value loss 權重 → value 練得更準」。配方:全新 600 iter, --value-coef 3.0,
+--league --league-ratio 0.3, dominance 內建(306維), forced-pass 跳過。--no-resume。
+
+**結果(同條件對照 V6, probe_value.py + eval_reward.py)**:
+| 指標 | V7 (coef=3) | V6 (coef=1, 現役) | 贏家 |
+|------|-------------|-------------------|------|
+| MCTS-80 vs heuristic (200局) | +4.10 ± 1.60 | **+8.26 ± 1.98** | V6(近2倍)|
+| MCTS win% | 22.5% | **30.0%** | V6 |
+| greedy avg_score (2000局) | -3.20 | **-2.24** | V6 |
+| value 相關 r (晚期) | 0.30 | **0.50** | V6 |
+| value 校準斜率 (晚期) | +0.45 | **+0.93** | V6 |
+
+**全面落敗。value-coef=3 不是把 value 練準, 是放大對「高雜訊 MC target」(std~19)的
+擬合** → v_loss 訓練中一路 0.015→0.10 上升(target drift + 過度擬合雜訊), 校準反而崩壞。
+連帶 policy 梯度被餓瘦 → greedy/MCTS policy 也變差。
+
+**教訓**:
+1. 「<1% 梯度」不代表「該放大權重」。Big2 的 MC value target 本質噪音極大, value head
+   理應保守(對噪音目標回歸均值, 斜率<1 是正常的)。V6 的 coef=1 已是好平衡。
+2. 想練更準的 value, 正確方向不是加權重, 而是「降低 target 噪音」(更多 sims 的更深搜尋
+   產生更穩定的 leaf 評估; 或 TD bootstrap), 或更多資料。
+3. value-coef 若要動, 上限 ~1.5; coef=3 確定過頭。
+4. 再次驗證「乾淨單次 cosine 配方」難被小調參超越 — 跟 re-warm LR 教訓一致。
+
+**結論: V7 棄用。V6 維持現役(全程未動)。下一次迭代應投資已記錄的大槓桿
+(更多 self-play sims、約束式 determinization、真人棋譜), 不是繼續微調係數。**
