@@ -84,13 +84,18 @@ class MCTS:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def run(self, env, temperature: float = 1.0, time_limit: float = None):
+    def run(self, env, temperature: float = 1.0, time_limit: float = None,
+            return_root_value: bool = False):
         """
         Run MCTS from current `env` state.
 
         Returns:
             action: int  — selected action
             visits: np.ndarray (ACTION_SIZE,)  — visit count distribution
+            root_value: np.ndarray (4,)  — ONLY if return_root_value=True; the
+                search-averaged 4-dim value (absolute player index) at the root.
+                This is the MCTS-improved value estimate used as the TD(λ)
+                bootstrap target in self-play (better than the raw network value).
         """
         root = MCTSNode(env.clone(), env.current_player)
         self._expand(root)   # model forward pass; stores priors, no child cloning
@@ -105,6 +110,13 @@ class MCTS:
 
         visits = self._visit_counts(root, env.ACTION_SIZE)
         action = self._select_action(visits, temperature)
+        if return_root_value:
+            root_value = (
+                root.value_sum / root.visit_count
+                if root.visit_count > 0
+                else np.zeros(4, dtype=np.float64)
+            )
+            return action, visits, root_value
         return action, visits
 
     def _simulate(self, root: MCTSNode) -> None:

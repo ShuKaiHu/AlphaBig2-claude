@@ -116,10 +116,11 @@ def run_episode(
     makes the 4-dim value head see all perspectives and lets the policy head
     learn from every seat.
 
-    Value targets are the 4-dim Monte-Carlo terminal outcome (one normalized
-    reward per ABSOLUTE player index), shared by every step of the episode —
-    the eventual outcome is the same fact regardless of which state/perspective
-    we are at.
+    Value targets are 4-dim (one normalized reward per ABSOLUTE player index).
+    For self-play (MCTS) episodes they are forward-view TD(λ) returns that
+    bootstrap from each state's MCTS root value (lower variance than the raw
+    terminal, especially early-game).  For bc episodes they are the pure
+    Monte-Carlo terminal outcome.  See the value-target block below.
 
     `opponent`: optional dict mapping player index (1..4) → callable(env)->action
                 to override specific seats with a frozen pool model or heuristic.
@@ -169,8 +170,10 @@ def run_episode(
                 action = _heuristic_action(env)
                 visits = np.zeros(env.ACTION_SIZE, dtype=np.float32)
                 visits[action] = 1.0
+                root_value = None
             else:
-                action, visits = mcts.run(env, temperature=temperature)
+                action, visits, root_value = mcts.run(
+                    env, temperature=temperature, return_root_value=True)
 
             total_v = visits.sum()
             valid_sum = valid.sum()
@@ -188,6 +191,10 @@ def run_episode(
                 "valid": valid.astype(np.float32),
                 "policy_target": policy_target.astype(np.float32),
                 "belief_target": _belief_target_for(game, player),
+                # MCTS-improved 4-dim value (absolute index) at this state — the
+                # TD(λ) bootstrap signal. None for bc steps (pure MC instead).
+                "value_pred": (None if root_value is None
+                               else np.asarray(root_value, dtype=np.float64).reshape(4)),
             })
 
         rewards, done = env.step(action)
@@ -196,11 +203,29 @@ def run_episode(
             terminal_rewards = np.asarray(rewards, dtype=np.float64).reshape(4)
             break
 
-    # ── 4-dim Monte-Carlo value target (absolute player index) ──────────────
+    # ── Per-step value targets (absolute player index, 4-dim) ────────────────
     if terminal_rewards is None:
         terminal_rewards = np.zeros(4, dtype=np.float64)
-    value_target_vec = np.tanh(terminal_rewards / REWARD_SCALE).astype(np.float32)
+    G = np.tanh(terminal_rewards / REWARD_SCALE).astype(np.float64)  # terminal outcome
     terminal_reward = float(terminal_rewards[learner_player - 1])
+
+    # bc episodes → pure Monte-Carlo terminal (the true outcome of that heuristic
+    #   game; bootstrapping a self-play-trained value onto a heuristic trajectory
+    #   would be a distribution mismatch).
+    # self-play (MCTS) episodes → forward-view TD(λ).  With terminal-only reward
+    #   and γ=1 this reduces to the backward recursion
+    #       target[i] = (1-λ)·v[i+1] + λ·target[i+1],   target[last] = G
+    #   where v[i] = the MCTS root value at collected step i.  λ→1 recovers pure
+    #   MC; λ=0.9 cuts early-game target variance — the V7 lesson: fix the noisy
+    #   target, do NOT up-weight the value loss.
+    M = len(episode_steps)
+    value_targets = [G.copy() for _ in range(M)]
+    if not bc_mode and M >= 2:
+        for i in range(M - 2, -1, -1):
+            v_next = episode_steps[i + 1]["value_pred"]
+            if v_next is None:           # safety: fall back to MC for this link
+                continue
+            value_targets[i] = (1.0 - LAMBDA_TD) * v_next + LAMBDA_TD * value_targets[i + 1]
 
     data = [
         (
@@ -208,10 +233,10 @@ def run_episode(
             step["history"],
             step["valid"],
             step["policy_target"],
-            value_target_vec.copy(),     # (4,) shared across the episode
+            value_targets[i].astype(np.float32),
             step["belief_target"],
         )
-        for step in episode_steps
+        for i, step in enumerate(episode_steps)
     ]
     return data, terminal_reward
 
