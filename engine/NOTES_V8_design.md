@@ -114,3 +114,32 @@ for i in range(M-2, -1, -1):
 - 🅰 用獨立 `--checkpoint-dir engine/checkpoints_v8`,**絕不覆蓋 V6**(best.pt/latest.pt/saved/)。
 - 🅒heckpoint 要及早複製進 git-tracked 的 `saved/`(避免重蹈 V7 被誤刪覆轍)。
 - 期待務實:這是有原理的精進,非保證突破;天花板若是規模本質,真正破關需更大算力或真人棋譜。
+
+---
+
+## 🅰 結果 (2026-06-09, 600 iter 跑完, checkpoints_v8/best.pt = saved/v8_td_deploy.pt)
+
+**訓練動態:v_loss 全程穩定** 0.011→0.041(對照 V7 純MC+coef=3 失控到 0.10)→ TD 確實降了
+target 變異,沒搞砸。training best greedy avg_score = 1.57(V7 是 0.51)。
+
+**離線評估(probe_value.py 400局 + eval_reward.py MCTS-80 200局, 同條件對照 V6):**
+
+| 指標 | V8 (TD) | V6 (MC) | 判讀 |
+|------|---------|---------|------|
+| MCTS-80 vs heuristic | +5.30 ± 1.80 | **+8.26 ± 1.98** | 點估計偏 V6,但 ~1.1σ **不顯著**(CI 大幅重疊)|
+| MCTS win% | 27.0% | 30.0% | — |
+| value corr 整體 | **0.350** | 0.318 | 略升 |
+| value corr 晚期 | **0.542** | 0.495 | 升 |
+| value corr **早期** | 0.135 | 0.133 | **沒動 ← 核心假設失敗** |
+| value 校準斜率 晚期 | 0.81 | 0.93 | V6 較佳 |
+
+**結論:**
+1. TD value **沒害也沒明顯助益**。離線 V8 與 V6 **統計上分不出高下**(點估計略偏 V6)。
+   ≠ V7(V7 是 value 崩壞 + 全面明顯變差);**V8 是乾淨、同檔次的模型**。
+2. **核心假設「TD 修早期 value」失敗**:早期 corr 仍 0.13。
+   研判**早期 value 瓶頸是「資訊」非「噪音」**——隨機發牌開局本就難預測結局,降變異救不了。
+3. 含意:value target 變異不是現階段的主要瓶頸。下一步不該再碰 value target;
+   真正的槓桿仍是 NOTES_belief 記錄的:**更多 sims、約束式 determinization、真人棋譜模仿**。
+4. **最終成敗仍待使用者線上實測**(memory `eval-needs-online-data`):離線分不出 →
+   V8 是「乾淨、可上線一試」的候選,但無離線證據預期它會贏 V6。
+   V6 維持現役未動;V8 存於 saved/v8_td_deploy.pt。
