@@ -164,3 +164,29 @@ target 變異,沒搞砸。training best greedy avg_score = 1.57(V7 是 0.51)。
 
 **注意 caveat**:1.90σ 差 0.1 到嚴格顯著;V8 自身 avg+1.80 僅 1.14σ>打平(還沒「穩定贏錢」);
 V8/V6 不同天跑、對手可能不同(confound)。但 V8「最差平 V6、很可能更好、風險更低」,扶正下檔風險小。
+
+## 🔴 重大發現 (2026-06-10):executor control bug + 暴露模型跟牌弱點 → V9 核心靶子
+
+由新加的 `mcts_moves.jsonl` 逐手記錄抓出。
+
+### executor bug(已修)
+線上 wrapper 判斷「跟牌 vs 自由出牌」時,先用 `lead_actor is not None`、後改 `lead_actor=="self"`
+都錯 —— 實測 `lead_actor` 在自己跟牌時仍回報 "self"(它像「本局領頭/莊家」,非當墩控制者)。
+正解:用 **`last_played_by`**(桌上那張牌誰打的);別家打的→跟牌(control=0,且把要壓的牌
+設進 env.handsPlayed)。已修 `update()` + `_infer()`,診斷欄位(last_played_by/lead_actor/
+salvaged)併入 log。修正後驗證:follow 62/92、salvaged 0/62、lead_actor 在 20 個 follow 為 "self"
+(證明 lead_actor 不可靠)、last_played_by 從不為 self。
+
+### 「修對反而退步」的機制(重要)
+- 帶 bug 時:跟牌被當領牌,MCTS 用領牌邏輯(先丟小牌)+ obs_mask 過濾 → **歪打正著出最小合法牌**(好打法)。
+- 修正後:MCTS 真的搜跟牌 → **暴露模型跟牌價值判斷很弱**:62 手跟牌中 **25 手(40%)亂送大牌**
+  (用 A 壓 4、用 2 壓 5、用一對 2 壓一對 4),只有 2 手是「下家剩1張」規則逼高。
+- 線上:帶 bug +1.80(123局) vs 修正後 ~-6(~44局,樣本/對手有 confound,但機制可解釋退步)。
+→ 那個 bug 是「意外的拐杖」。決策(使用者):**保留正確修正,不加啟發式拐杖,把「跟牌亂送大牌」
+  留給 V9 訓練根治。** 當前部署 = 正確 control + V8 模型,線上會暫時較弱直到 V9。
+
+### V9 要解的核心問題:跟牌時模型不懂「留大牌(2/A/控場牌)的價值」
+推測根因:① MC/TD value 對「浪費一張 2」的懲罰訊號太弱(終局噪音蓋過);② self-play 的弱
+heuristic 對手不會懲罰浪費大牌 → 模型沒學到;③ 1秒 MCTS + 弱 value 解析不出「A 贏 vs 2 贏,留 2 較好」。
+V9 候選解法:更像人的對手(會懲罰浪費)、更多 sims(讓搜索解析最小壓制)、或在 value/reward 注入
+「保留高牌」的訊號。這是比「換 value target」更具體、更可驗證的 V9 方向。
