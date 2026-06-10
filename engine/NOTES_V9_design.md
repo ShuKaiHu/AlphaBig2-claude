@@ -127,3 +127,28 @@
 - 兩網路(i)還是共用 trunk(ii)?先 (i)。
 - value target:全資訊下要不要從 TD(λ) 退回純 MC(全資訊使終局更可預測,純 MC 變異可能已可接受)?可 A/B。
 - 五張型 void 的精確邏輯(組合層級)。
+
+---
+
+## V9a 實作紀錄 (2026-06-11, 已啟動訓練)
+
+**實作範圍與草案的差異(scope 決策):**
+- 🅐 全資訊 value:✅ 已實作。`Big2ValueNet`(0.68M 參數,純 MLP 462→256×4ResBlock→4,
+  **無 GRU** —— 上帝視角無隱藏資訊需從 history 推,省算力且原則正確)。
+  - 關鍵簡化:`belief_target` 本來就是 oracle 對手手牌(3×52 同編碼)→ 訓練輸入直接重用,
+    replay buffer / 資料收集零改動。`features.encode_opp_hands` 推論用(同 layout)。
+  - Big2Net 一字未動(policy + 蒙眼 value + belief 照 V8 訓練)→ **唯一變數 = MCTS 葉節點
+    評估換成全資訊 value**(`MCTS(value_model=...)`,None 則完全回到 V8 行為)。
+    蒙眼 value head 續訓 = 同一次 run 內建 ablation(可直接比 v_loss vs vf_loss、兩者 corr)。
+- 🅑 多重 void determinization:**遞延到部署階段**(訓練側 self-play 本來就全知,用不到;
+  屬線上 wrapper 改動,訓練跑的 ~1 天內平行做)。
+- 🅒 void 特徵:**遞延到 V9b** —— 實作時發現 engine actionHistory 與線上 MockGame 的
+  pass 記錄不一致(MockGame 不記對手 pass 進 actionHistory),直接做會有 train/deploy
+  mismatch,需先統一,不值得為了「便宜同向」打破單變數紀律。
+
+**煙霧測試即見的訊號**:iter 3 `vf_loss=0.0167 < v_loss=0.0340` —— 全資訊 value 比蒙眼
+value 好擬合,符合理論。速度:value net MLP 便宜,self-play 幾乎無 slowdown。
+
+**訓練配方**(= V8 + `--full-info-value`,單變數):600 iter / self-play 50 / sims 50 /
+bc-warmup 10 / bc-mix 0.15 / policy-temp 0.7 / belief 0.1 / value-coef 1.0 / no league /
+checkpoints_v9。checkpoint 格式:{model_state, value_state, ...}(wrapper 已相容 model_state)。

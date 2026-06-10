@@ -20,6 +20,7 @@ HIST_STEP_DIM = 29    # per-step history encoding
 HISTORY_LEN = 196     # theoretical max game length (49 plays × 4 steps/play)
 GRU_HIDDEN = 128      # GRU output dimension
 TOTAL_DIM = STATIC_DIM + GRU_HIDDEN
+OPP_HANDS_DIM = 52 * 3  # god-view: 3 opponents' actual hands (V9 full-info value net)
 
 # Card rank/suit helpers
 # card_id in [1..52]: rank = ceil(id/4) in [1..13], suit = id%4 in {0,1,2,3}
@@ -224,3 +225,23 @@ def encode_history_steps(game, history_len: int = HISTORY_LEN) -> np.ndarray:
                 s[26 + suit - 1] = 1.0
 
     return steps
+
+
+def encode_opp_hands(game, player: int) -> np.ndarray:
+    """God-view encoding of the three OTHER players' actual hands (V9 full-info
+    value net input). Layout is IDENTICAL to the belief-head target in
+    self_play._belief_target_for — 3 blocks of 52 card bits, opponents in
+    ascending absolute player index excluding `player` — so training can feed
+    the stored belief_target directly as this input.
+
+    Legitimate (not cheating) because the full-info value net is only ever
+    evaluated inside MCTS, where the world is already determinized: self-play
+    knows the true hands; online play has sampled them."""
+    feat = np.zeros(OPP_HANDS_DIM, dtype=np.float32)
+    others = [p for p in range(1, 5) if p != player]
+    for i, opp in enumerate(others):
+        for card in game.currentHands[opp]:
+            c = int(card)
+            if 1 <= c <= 52:
+                feat[i * 52 + c - 1] = 1.0
+    return feat

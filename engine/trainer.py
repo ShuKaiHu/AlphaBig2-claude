@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from engine.model import Big2Net
+from engine.model import Big2Net, Big2ValueNet
 from engine.self_play import run_episode, make_pool_opponent
 from engine.replay_buffer import ReplayBuffer
 from engine.evaluator import evaluate_vs_heuristic
@@ -55,13 +55,24 @@ def train(
     league: bool = False,      # train some episodes vs frozen PAST versions
                                # (anti-collapse diversity), not just mirror-self.
     league_ratio: float = 0.5, # fraction of (post-warmup) episodes using pool opps.
+    full_info_value: bool = False,  # V9: train a god-view Big2ValueNet (input =
+                                    # static + true opponent hands) and use it for
+                                    # MCTS leaf evaluation in self-play. The policy
+                                    # net (Big2Net) stays imperfect-info and its own
+                                    # value head keeps training as before (ablation/
+                                    # fallback). Training input reuses the stored
+                                    # belief_target (same 3×52 layout).
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
     latest_path = os.path.join(checkpoint_dir, "latest.pt")
     best_path = os.path.join(checkpoint_dir, "best.pt")
 
     model = Big2Net()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    value_net = Big2ValueNet() if full_info_value else None
+    params = list(model.parameters())
+    if value_net is not None:
+        params += list(value_net.parameters())
+    optimizer = torch.optim.Adam(params, lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=n_iterations, eta_min=lr * 0.1
     )
@@ -94,6 +105,8 @@ def train(
             optimizer.load_state_dict(ckpt["optimizer_state"])
         except ValueError:
             print("Optimizer state incompatible (architecture changed), starting fresh optimizer.")
+        if value_net is not None and "value_state" in ckpt:
+            value_net.load_state_dict(ckpt["value_state"])
         best_avg_score = ckpt.get("best_avg_score", -float("inf"))
         start_iter = ckpt.get("iteration", 0) + 1
         print(f"Resumed from iteration {start_iter - 1}, best_avg_score={best_avg_score:.3f}")
@@ -107,6 +120,8 @@ def train(
 
         # ── Self-play ─────────────────────────────────────────────────────────
         model.eval()
+        if value_net is not None:
+            value_net.eval()
         ep_rewards = []
         bc_active = (iteration <= bc_warmup_iters)
         n_bc_mix = int(self_play_episodes * bc_mix_ratio) if not bc_active else 0
@@ -127,6 +142,7 @@ def train(
                 temperature=temperature,
                 opponent=opp,
                 bc_mode=use_bc,
+                value_model=value_net,
             )
             buffer.add_episode(data)
             ep_rewards.append(reward)
@@ -141,7 +157,9 @@ def train(
             continue
 
         model.train()
-        p_losses, v_losses, b_losses, entropies = [], [], [], []
+        if value_net is not None:
+            value_net.train()
+        p_losses, v_losses, b_losses, entropies, vf_losses = [], [], [], [], []
         for _ in range(train_steps):
             statics, histories, valids, pol_tgts, val_tgts, bel_tgts = buffer.sample(batch_size)
             sf = torch.FloatTensor(statics)
@@ -183,9 +201,18 @@ def train(
             # inflated entropy here and caused runaway. Exploration comes from
             # MCTS root Dirichlet noise instead.
             loss = p_loss + value_coef * v_loss + belief_coef * b_loss - entropy_coef * entropy
+
+            # V9 full-info value net: same TD(λ) targets, but the input includes
+            # the true opponent hands (bel_tgts has exactly that layout).
+            if value_net is not None:
+                vf = value_net(sf, bt)
+                vf_loss = F.mse_loss(vf, vt)
+                loss = loss + value_coef * vf_loss
+                vf_losses.append(vf_loss.item())
+
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(params, 1.0)
             optimizer.step()
 
             p_losses.append(p_loss.item())
@@ -208,6 +235,9 @@ def train(
             f"T={temperature:.2f}",
             f"buf={len(buffer)}",
         ]
+        if vf_losses:
+            # full-info value loss — should run BELOW v_loss (more predictable input)
+            log_parts.insert(5, f"vf_loss={np.mean(vf_losses):.4f}")
 
         if iteration % eval_freq == 0:
             model.eval()
@@ -218,7 +248,11 @@ def train(
             ]
             if avg_score > best_avg_score:
                 best_avg_score = avg_score
-                torch.save(model.state_dict(), best_path)
+                if value_net is not None:
+                    torch.save({"model_state": model.state_dict(),
+                                "value_state": value_net.state_dict()}, best_path)
+                else:
+                    torch.save(model.state_dict(), best_path)
                 log_parts.append("✓ best")
 
         elapsed = time.time() - t0
@@ -238,15 +272,15 @@ def train(
             print(f"  Pool updated: {len(opponent_pool)} frozen opponents")
 
         # ── Save checkpoint ───────────────────────────────────────────────────
-        torch.save(
-            {
-                "iteration": iteration,
-                "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "best_avg_score": best_avg_score,
-            },
-            latest_path,
-        )
+        ckpt_out = {
+            "iteration": iteration,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "best_avg_score": best_avg_score,
+        }
+        if value_net is not None:
+            ckpt_out["value_state"] = value_net.state_dict()
+        torch.save(ckpt_out, latest_path)
 
     print(f"\nTraining complete. Best avg_score: {best_avg_score:.3f}")
     print(f"Best model: {best_path}")
@@ -281,6 +315,9 @@ def _parse_args():
                    help="Train some episodes vs frozen past versions (anti-collapse)")
     p.add_argument("--league-ratio", type=float, default=0.5, dest="league_ratio",
                    help="Fraction of post-warmup episodes using pool opponents")
+    p.add_argument("--full-info-value", action="store_true", dest="full_info_value",
+                   help="V9: train a god-view value net (sees all four hands) and use "
+                        "it for MCTS leaf evaluation in self-play")
     p.add_argument("--checkpoint-dir", type=str, default=CHECKPOINT_DIR, dest="checkpoint_dir",
                    help="Where to write latest.pt/best.pt (use a separate dir to protect deployment)")
     p.add_argument("--torch-threads", type=int, default=3,
@@ -314,4 +351,5 @@ if __name__ == "__main__":
         league=args.league,
         league_ratio=args.league_ratio,
         checkpoint_dir=args.checkpoint_dir,
+        full_info_value=args.full_info_value,
     )

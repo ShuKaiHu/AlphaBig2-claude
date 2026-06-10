@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from engine.features import STATIC_DIM, GRU_HIDDEN, HIST_STEP_DIM, HISTORY_LEN
+from engine.features import STATIC_DIM, GRU_HIDDEN, HIST_STEP_DIM, HISTORY_LEN, OPP_HANDS_DIM
 import enumerateOptions
 
 ACTION_SIZE = enumerateOptions.passInd + 1  # 14739
@@ -129,3 +129,58 @@ class Big2Net(nn.Module):
         probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
         value = val.squeeze(0).cpu().numpy().astype(np.float32)  # (4,)
         return probs, value
+
+
+class Big2ValueNet(nn.Module):
+    """Full-information (god-view) value network — V9.
+
+    Evaluates a position knowing ALL FOUR hands. Only ever used inside MCTS,
+    where the world is determinized by construction (self-play: true hands;
+    online: sampled hands), so feeding the opponents' cards is not cheating —
+    it just stops throwing away information the search already has. The policy
+    net (Big2Net) stays imperfect-information, since it must act in the real
+    game and serve as the MCTS prior.
+
+    No history GRU on purpose: history's role is inferring HIDDEN information,
+    and there is none in a god-view evaluation — the static snapshot plus all
+    four hands fully determines the strategic position. This also keeps the
+    extra per-expansion forward pass cheap (pure MLP).
+
+    Input:  static_feat (STATIC_DIM) + opp_hands (3×52, same layout as the
+            belief target / features.encode_opp_hands)
+    Output: (4,) tanh — expected normalized terminal reward per ABSOLUTE player.
+    """
+
+    def __init__(self, hidden_dim: int = 256, n_res_blocks: int = 4):
+        super().__init__()
+        input_dim = STATIC_DIM + OPP_HANDS_DIM
+        self.input_proj = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+        )
+        self.res_blocks = nn.ModuleList(
+            [ResBlock(hidden_dim) for _ in range(n_res_blocks)]
+        )
+        self.value_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 4),
+            nn.Tanh(),
+        )
+
+    def forward(self, static_feat, opp_hands):
+        x = torch.cat([static_feat, opp_hands], dim=-1)
+        x = self.input_proj(x)
+        for block in self.res_blocks:
+            x = block(x)
+        return self.value_head(x)
+
+    @torch.no_grad()
+    def predict(self, static_feat, opp_hands):
+        """Single-sample inference. Returns np.ndarray (4,)."""
+        self.eval()
+        sf = torch.FloatTensor(static_feat).unsqueeze(0)
+        oh = torch.FloatTensor(opp_hands).unsqueeze(0)
+        val = self.forward(sf, oh)
+        return val.squeeze(0).cpu().numpy().astype(np.float32)

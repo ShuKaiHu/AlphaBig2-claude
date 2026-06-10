@@ -107,6 +107,7 @@ def run_episode(
     learner_player: int = 1,   # kept for API compat; reward returned is this player's
     opponent=None,             # optional dict {player:callable} to override seats
     bc_mode: bool = False,
+    value_model=None,          # optional Big2ValueNet (V9): full-info MCTS leaf eval
 ) -> tuple:
     """
     Run ONE true 4-player self-play episode (max^n MCTS).
@@ -137,7 +138,8 @@ def run_episode(
     """
     env = Big2Env()
     env.reset()
-    mcts = None if bc_mode else MCTS(model, n_simulations=n_simulations)
+    mcts = None if bc_mode else MCTS(model, n_simulations=n_simulations,
+                                     value_model=value_model)
     overrides = opponent if isinstance(opponent, dict) else {}
 
     episode_steps = []     # collected (data-contributing) steps

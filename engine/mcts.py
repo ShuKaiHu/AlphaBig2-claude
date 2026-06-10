@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 import time
 import numpy as np
-from engine.features import encode_static, encode_history_steps
+from engine.features import encode_static, encode_history_steps, encode_opp_hands
 
 
 class MCTSNode:
@@ -76,11 +76,15 @@ class MCTS:
         n_simulations: int = 50,
         c_puct: float = 2.0,
         dirichlet_frac: float = 0.25,
+        value_model=None,   # optional Big2ValueNet (V9): full-info leaf evaluation.
+                            # None → use `model`'s own (imperfect-info) value head,
+                            # preserving V6/V8 behavior exactly.
     ):
         self.model = model
         self.n_simulations = n_simulations
         self.c_puct = c_puct
         self.dirichlet_frac = dirichlet_frac
+        self.value_model = value_model
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -150,6 +154,11 @@ class MCTS:
         history = encode_history_steps(game)
         valid = env.get_valid_actions()
         probs, value = self.model.predict(static, history, valid)  # value: (4,)
+        if self.value_model is not None:
+            # V9 full-info leaf evaluation: the tree's world is determinized, so
+            # the opponents' hands are known here — use them instead of the
+            # policy net's blind (imperfect-info) value head.
+            value = self.value_model.predict(static, encode_opp_hands(game, player))
         value = np.asarray(value, dtype=np.float64).reshape(4)
 
         valid_actions = np.flatnonzero(valid)
