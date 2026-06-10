@@ -37,13 +37,15 @@ def _mcts_action(mcts, env):
     return action
 
 
-def evaluate(model, n_games=2000, learner=1, sims=0, seed=0):
-    """Model as `learner` vs 3 heuristics. Returns dict of reward stats."""
+def evaluate(model, n_games=2000, learner=1, sims=0, seed=0, value_model=None):
+    """Model as `learner` vs 3 heuristics. Returns dict of reward stats.
+    value_model: optional Big2ValueNet (V9) — full-info MCTS leaf evaluation.
+    This eval is perfect-info (true env), so no determinization is involved."""
     np.random.seed(seed)
     mcts = None
     if sims > 0:
         from engine.mcts import MCTS
-        mcts = MCTS(model, n_simulations=sims)
+        mcts = MCTS(model, n_simulations=sims, value_model=value_model)
     scores, placements = [], []
     env = Big2Env()
     for _ in range(n_games):
@@ -84,6 +86,8 @@ def _placement(env, learner):
 
 
 def load_model(path):
+    """Returns (model, value_model). value_model is a Big2ValueNet when the
+    checkpoint carries a V9 full-info value net ("value_state"), else None."""
     ckpt = torch.load(path, map_location="cpu")
     state = ckpt["model_state"] if isinstance(ckpt, dict) and "model_state" in ckpt else ckpt
     model = Big2Net()
@@ -93,7 +97,13 @@ def load_model(path):
     compatible = {k: v for k, v in state.items() if k in cur and cur[k].shape == v.shape}
     model.load_state_dict(compatible, strict=False)
     model.eval()
-    return model
+    value_model = None
+    if isinstance(ckpt, dict) and "value_state" in ckpt:
+        from engine.model import Big2ValueNet
+        value_model = Big2ValueNet()
+        value_model.load_state_dict(ckpt["value_state"])
+        value_model.eval()
+    return model, value_model
 
 
 if __name__ == "__main__":
@@ -105,14 +115,16 @@ if __name__ == "__main__":
     ap.add_argument("--seeds", type=int, default=1, help="repeat with N seeds for variance")
     args = ap.parse_args()
 
-    model = load_model(args.checkpoint)
+    model, value_model = load_model(args.checkpoint)
     print(f"checkpoint: {args.checkpoint}")
-    print(f"mode: {'MCTS '+str(args.mcts)+' sims' if args.mcts else 'greedy policy'}, "
+    print(f"mode: {'MCTS '+str(args.mcts)+' sims' if args.mcts else 'greedy policy'}"
+          f"{' + full-info value (V9)' if value_model is not None and args.mcts else ''}, "
           f"{args.games} games × {args.seeds} seed(s)\n")
 
     avgs = []
     for seed in range(args.seeds):
-        r = evaluate(model, n_games=args.games, sims=args.mcts, seed=seed)
+        r = evaluate(model, n_games=args.games, sims=args.mcts, seed=seed,
+                     value_model=value_model)
         avgs.append(r["avg_score"])
         print(f"seed {seed}: avg_score={r['avg_score']:+.3f} ± {r['stderr']:.3f}  "
               f"win={r['win_rate']:.1%}  1st={r['first_rate']:.1%}  "
