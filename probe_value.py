@@ -36,14 +36,25 @@ def probe(ckpt, n_games=400, learner=1, seed=0):
     np.random.seed(seed); torch.manual_seed(seed)
     model = Big2Net()
     sd = torch.load(ckpt, map_location="cpu")
-    sd = sd.get("model", sd) if isinstance(sd, dict) and "model" in sd else sd
-    model.load_state_dict(sd); model.eval()
+    state = sd
+    if isinstance(sd, dict):
+        state = sd.get("model_state", sd.get("model", sd))
+    model.load_state_dict(state); model.eval()
 
-    rows = []  # (pred, frac_played, idx_in_game)
+    # V9: probe the full-info value net on the SAME states (true opp hands —
+    # this probe runs in a perfect-info env, so the god view is exact here).
+    value_net = None
+    if isinstance(sd, dict) and "value_state" in sd:
+        from engine.model import Big2ValueNet
+        from engine.features import encode_opp_hands
+        value_net = Big2ValueNet()
+        value_net.load_state_dict(sd["value_state"]); value_net.eval()
+
+    rows = []  # (pred_blind, pred_full(nan if none), truth, phase)
     env = Big2Env()
     for _ in range(n_games):
         env.reset()
-        states = []  # (pred_value_self, n_cards_remaining_self)
+        states = []
         while not env.done:
             p = env.current_player
             if p == learner:
@@ -55,7 +66,12 @@ def probe(ckpt, n_games=400, learner=1, seed=0):
                         torch.FloatTensor(hs).unsqueeze(0),
                         torch.FloatTensor(env.get_valid_actions()).unsqueeze(0))
                 pred = float(val_t.squeeze(0).numpy()[learner - 1])
-                states.append((pred, int(g.currentHands[learner].size)))
+                pred_f = float("nan")
+                if value_net is not None:
+                    from engine.features import encode_opp_hands
+                    vf = value_net.predict(st, encode_opp_hands(g, learner))
+                    pred_f = float(vf[learner - 1])
+                states.append((pred, pred_f))
                 a = _greedy(model, env)
             else:
                 a = _heuristic_action(env)
@@ -63,12 +79,12 @@ def probe(ckpt, n_games=400, learner=1, seed=0):
             if done:
                 truth = float(np.tanh(rewards[learner - 1] / REWARD_SCALE))
                 n = len(states)
-                for i, (pred, rem) in enumerate(states):
-                    rows.append((pred, truth, i / max(1, n - 1)))
+                for i, (pred, pred_f) in enumerate(states):
+                    rows.append((pred, pred_f, truth, i / max(1, n - 1)))
                 break
-    arr = np.array(rows)  # (N,3): pred, truth, phase
-    pred, truth, phase = arr[:, 0], arr[:, 1], arr[:, 2]
-    def stats(mask, label):
+    arr = np.array(rows)  # (N,4)
+    truth, phase = arr[:, 2], arr[:, 3]
+    def stats(pred, mask, label):
         pr, tr = pred[mask], truth[mask]
         if len(pr) < 5 or pr.std() < 1e-6:
             print(f"  {label:6s}: n={len(pr):5d}  r=  n/a (退化)")
@@ -78,12 +94,17 @@ def probe(ckpt, n_games=400, learner=1, seed=0):
         b = np.polyfit(pr, tr, 1)[0]
         print(f"  {label:6s}: n={len(pr):5d}  r={r:+.3f}  斜率={b:+.2f}  "
               f"pred[{pr.mean():+.2f}±{pr.std():.2f}] truth[{tr.mean():+.2f}±{tr.std():.2f}]")
+    def report(pred, title):
+        print(f"  ── {title} ──")
+        stats(pred, np.ones(len(arr), bool), "ALL")
+        stats(pred, phase < 0.34, "早期")
+        stats(pred, (phase >= 0.34) & (phase < 0.67), "中期")
+        stats(pred, phase >= 0.67, "晚期")
     print(f"\n{ckpt}")
-    print(f"  總狀態數={len(arr)}  整體:")
-    stats(np.ones(len(arr), bool), "ALL")
-    stats(phase < 0.34, "早期")
-    stats((phase >= 0.34) & (phase < 0.67), "中期")
-    stats(phase >= 0.67, "晚期")
+    print(f"  總狀態數={len(arr)}")
+    report(arr[:, 0], "蒙眼 value head (只看自己手牌)")
+    if value_net is not None:
+        report(arr[:, 1], "全資訊 value net (上帝視角, 真實對手手牌)")
 
 
 if __name__ == "__main__":

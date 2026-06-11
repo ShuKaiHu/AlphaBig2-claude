@@ -152,3 +152,31 @@ value 好擬合,符合理論。速度:value net MLP 便宜,self-play 幾乎無 s
 **訓練配方**(= V8 + `--full-info-value`,單變數):600 iter / self-play 50 / sims 50 /
 bc-warmup 10 / bc-mix 0.15 / policy-temp 0.7 / belief 0.1 / value-coef 1.0 / no league /
 checkpoints_v9。checkpoint 格式:{model_state, value_state, ...}(wrapper 已相容 model_state)。
+
+---
+
+## V9a 離線評估結果 (2026-06-11) — 四項指標全過,待線上裁決
+
+訓練完成(600 iter,~110s/iter)。`saved/v9a_fullinfo_deploy.pt`(model_state + value_state)。
+
+| 指標 | V9a (全資訊 value) | V8 (蒙眼) | 判讀 |
+|------|--------------------|-----------|------|
+| 訓練 vf_loss vs v_loss | **0.0074** | 0.0483 | 全資訊好擬合 6.5x |
+| value corr 早期 | **0.250**(斜率 0.72) | 0.135(0.38) | **早期天花板被打破(近 2x)** — 證實天花板是不完全資訊,非本質噪音 |
+| value corr 整體/校準 | 0.357 / 斜率 0.83 | 0.350 / 0.60 | 校準大幅改善 |
+| MCTS-80 vs heuristic | +5.64 ± 1.50(win 33%) | +5.30 ± 1.80(win 27%) | 無退步,win 率最高 |
+| **跟牌浪費率**(follow_waste.py, 100局80sims) | **24.0%**(幅度 7.7/max31) | 34.3%(10.4/max48) | **核心弱點直接改善 ~1/3** |
+
+附帶觀察:V9 的蒙眼 head 也比 V8 進步(早期 0.17 vs 0.13)— 全資訊 leaf eval 讓 TD target
+變好,連帶餵好蒙眼 head。手動煙霧:要壓 ♣5 時 68% 選最小壓制 ♥6(♠K 10%,2 不進前三)。
+
+**部署配套已就緒並驗證**:wrapper 自動偵測 value_state → 載入 god-view net + 切 4 世界
+determinization(1s 預算均分、平均 visit 分布),`mcts_moves.jsonl` note 帶 `_4det` 後綴。
+V8/V6 行為完全不變。eval_reward / probe_value 均自動偵測 V9 格式。
+
+**工具新增**:`follow_waste.py`(跟牌浪費率,V9 成功判準的離線版;注意 env 空 mask 的
+forced-skip 要先短路,否則 MCTS 退化成 argmax(zeros)=action 0)。
+
+**下一步:使用者線上實測**(ALPHA_BIG2_CKPT=saved/v9a_fullinfo_deploy.pt,≥30 局),
+對照 baseline = 修正版 wrapper 下的 V8(注意:V8 的 +1.80 是 control-bug 時代測的,
+公平比較要同 wrapper 重測或直接看 V9 絕對分數與浪費率)。離線全綠 ≠ 線上贏,最終以線上為準。
