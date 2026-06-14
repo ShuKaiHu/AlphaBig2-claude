@@ -87,9 +87,15 @@ def _placement(env, learner):
 
 def load_model(path):
     """Returns (model, value_model). value_model is a Big2ValueNet when the
-    checkpoint carries a V9 full-info value net ("value_state"), else None."""
+    checkpoint carries a V9 full-info value net ("value_state"), else None.
+    Auto-detects combo features (V9b) from the checkpoint's input width."""
     ckpt = torch.load(path, map_location="cpu")
     state = ckpt["model_state"] if isinstance(ckpt, dict) and "model_state" in ckpt else ckpt
+    import engine.features as _F
+    w = state.get("input_proj.0.weight")
+    if w is not None:
+        ckpt_static = w.shape[1] - _F.GRU_HIDDEN
+        _F.set_combo(ckpt_static >= 302 + 4 + 8)   # 314 = base+dominance+combo
     model = Big2Net()
     cur = model.state_dict()
     # Tolerate shape mismatches (e.g. evaluating an old 1-dim-value checkpoint):

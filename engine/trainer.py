@@ -55,6 +55,8 @@ def train(
     league: bool = False,      # train some episodes vs frozen PAST versions
                                # (anti-collapse diversity), not just mirror-self.
     league_ratio: float = 0.5, # fraction of (post-warmup) episodes using pool opps.
+    combo_features: bool = False,   # V9b: add combo-structure features to encode_static
+                                    # (must be set before building models)
     full_info_value: bool = False,  # V9: train a god-view Big2ValueNet (input =
                                     # static + true opponent hands) and use it for
                                     # MCTS leaf evaluation in self-play. The policy
@@ -63,6 +65,11 @@ def train(
                                     # fallback). Training input reuses the stored
                                     # belief_target (same 3×52 layout).
 ):
+    if combo_features:
+        from engine import features as _F
+        _F.set_combo(True)
+        print(f"Combo features ON → STATIC_DIM={_F.STATIC_DIM}")
+
     os.makedirs(checkpoint_dir, exist_ok=True)
     latest_path = os.path.join(checkpoint_dir, "latest.pt")
     best_path = os.path.join(checkpoint_dir, "best.pt")
@@ -318,6 +325,9 @@ def _parse_args():
     p.add_argument("--full-info-value", action="store_true", dest="full_info_value",
                    help="V9: train a god-view value net (sees all four hands) and use "
                         "it for MCTS leaf evaluation in self-play")
+    p.add_argument("--combo-features", action="store_true", dest="combo_features",
+                   help="V9b: add combo-structure features (pairs/straights/etc.) so "
+                        "policy+value can value preserving 5-card combos")
     p.add_argument("--checkpoint-dir", type=str, default=CHECKPOINT_DIR, dest="checkpoint_dir",
                    help="Where to write latest.pt/best.pt (use a separate dir to protect deployment)")
     p.add_argument("--torch-threads", type=int, default=3,
@@ -352,4 +362,5 @@ if __name__ == "__main__":
         league_ratio=args.league_ratio,
         checkpoint_dir=args.checkpoint_dir,
         full_info_value=args.full_info_value,
+        combo_features=args.combo_features,
     )

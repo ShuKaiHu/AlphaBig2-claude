@@ -6,7 +6,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from engine.features import STATIC_DIM, GRU_HIDDEN, HIST_STEP_DIM, HISTORY_LEN, OPP_HANDS_DIM
+# NOTE: read dims via the module (engine.features.STATIC_DIM), NOT a by-value
+# import — STATIC_DIM changes when combo features are toggled (features.set_combo),
+# and models must pick up the current value at construction time.
+from engine import features as _F
+from engine.features import GRU_HIDDEN, HIST_STEP_DIM, HISTORY_LEN, OPP_HANDS_DIM
 import enumerateOptions
 
 ACTION_SIZE = enumerateOptions.passInd + 1  # 14739
@@ -55,7 +59,7 @@ class Big2Net(nn.Module):
             num_layers=1,
             batch_first=True,
         )
-        input_dim = STATIC_DIM + gru_hidden
+        input_dim = _F.STATIC_DIM + gru_hidden
         self.input_proj = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -153,7 +157,7 @@ class Big2ValueNet(nn.Module):
 
     def __init__(self, hidden_dim: int = 256, n_res_blocks: int = 4):
         super().__init__()
-        input_dim = STATIC_DIM + OPP_HANDS_DIM
+        input_dim = _F.STATIC_DIM + OPP_HANDS_DIM
         self.input_proj = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),

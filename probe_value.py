@@ -34,11 +34,15 @@ def _greedy(model, env):
 
 def probe(ckpt, n_games=400, learner=1, seed=0):
     np.random.seed(seed); torch.manual_seed(seed)
-    model = Big2Net()
     sd = torch.load(ckpt, map_location="cpu")
     state = sd
     if isinstance(sd, dict):
         state = sd.get("model_state", sd.get("model", sd))
+    import engine.features as _F
+    w = state.get("input_proj.0.weight")
+    if w is not None:
+        _F.set_combo((w.shape[1] - _F.GRU_HIDDEN) >= 314)
+    model = Big2Net()
     model.load_state_dict(state); model.eval()
 
     # V9: probe the full-info value net on the SAME states (true opp hands —
