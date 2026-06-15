@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 
 from engine.model import Big2Net, Big2ValueNet
-from engine.self_play import run_episode, make_pool_opponent
+from engine.self_play import run_episode, make_pool_opponent, _smart_heuristic_action
 from engine.replay_buffer import ReplayBuffer
 from engine.evaluator import evaluate_vs_heuristic
 
@@ -55,8 +55,13 @@ def train(
     league: bool = False,      # train some episodes vs frozen PAST versions
                                # (anti-collapse diversity), not just mirror-self.
     league_ratio: float = 0.5, # fraction of (post-warmup) episodes using pool opps.
-    combo_features: bool = False,   # V9b: add combo-structure features to encode_static
+    combo_features: bool = False,   # V9c: add grayscale combo-strength features
                                     # (must be set before building models)
+    strong_opp_ratio: float = 0.0,  # V9c: fraction of post-warmup episodes where
+                                    # seats 2-4 are the SMART heuristic (keeps big
+                                    # cards, preserves combos, minimal-win) so the
+                                    # learner (seat 1, MCTS) faces an opponent that
+                                    # PUNISHES the mistakes pure self-play never did.
     full_info_value: bool = False,  # V9: train a god-view Big2ValueNet (input =
                                     # static + true opponent hands) and use it for
                                     # MCTS leaf evaluation in self-play. The policy
@@ -139,7 +144,13 @@ def train(
             # instead of collapsing to a narrow mirror-self equilibrium. The rest
             # stay pure 4-player self-play (all seats contribute data).
             opp = None
-            if (league and opponent_pool and not use_bc
+            if not use_bc and strong_opp_ratio > 0 and np.random.rand() < strong_opp_ratio:
+                # V9c: learner (seat 1, MCTS) vs SMART heuristic (seats 2-4) — an
+                # opponent that keeps big cards / preserves combos / minimal-wins,
+                # so it PUNISHES wasting big cards & breaking combos (the signal
+                # pure self-play lacked). Only seat 1 contributes training data.
+                opp = {s: _smart_heuristic_action for s in (2, 3, 4)}
+            elif (league and opponent_pool and not use_bc
                     and np.random.rand() < league_ratio):
                 opp = {s: make_pool_opponent(np.random.choice(opponent_pool))
                        for s in (2, 3, 4)}
@@ -326,8 +337,11 @@ def _parse_args():
                    help="V9: train a god-view value net (sees all four hands) and use "
                         "it for MCTS leaf evaluation in self-play")
     p.add_argument("--combo-features", action="store_true", dest="combo_features",
-                   help="V9b: add combo-structure features (pairs/straights/etc.) so "
-                        "policy+value can value preserving 5-card combos")
+                   help="V9c: add grayscale combo-strength features (best single/pair/"
+                        "straight/FH/quad/SF strength) so policy+value can value combos")
+    p.add_argument("--strong-opp-ratio", type=float, default=0.0, dest="strong_opp_ratio",
+                   help="V9c: fraction of episodes with seats 2-4 = smart heuristic "
+                        "(punishes wasted big cards / broken combos)")
     p.add_argument("--checkpoint-dir", type=str, default=CHECKPOINT_DIR, dest="checkpoint_dir",
                    help="Where to write latest.pt/best.pt (use a separate dir to protect deployment)")
     p.add_argument("--torch-threads", type=int, default=3,
@@ -363,4 +377,5 @@ if __name__ == "__main__":
         checkpoint_dir=args.checkpoint_dir,
         full_info_value=args.full_info_value,
         combo_features=args.combo_features,
+        strong_opp_ratio=args.strong_opp_ratio,
     )

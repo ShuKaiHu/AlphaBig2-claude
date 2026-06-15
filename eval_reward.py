@@ -95,7 +95,7 @@ def load_model(path):
     w = state.get("input_proj.0.weight")
     if w is not None:
         ckpt_static = w.shape[1] - _F.GRU_HIDDEN
-        _F.set_combo(ckpt_static >= 302 + 4 + 8)   # 314 = base+dominance+combo
+        _F.set_combo(ckpt_static >= 302 + 4 + 6)   # 314 = base+dominance+combo
     model = Big2Net()
     cur = model.state_dict()
     # Tolerate shape mismatches (e.g. evaluating an old 1-dim-value checkpoint):

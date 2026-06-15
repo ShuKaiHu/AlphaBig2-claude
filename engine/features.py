@@ -15,16 +15,15 @@ import os as _os
 DOMINANCE_ON = _os.environ.get("BIG2_DOMINANCE") != "0"   # default ON
 _DOMINANCE_DIM = 4 if DOMINANCE_ON else 0
 
-# V9b: combo-structure features (how many pairs/triples/quads/straights/flushes/
-# full-houses my hand can still form). The full-info value net was shown to be
-# BLIND to its own combo structure (value(keep straight) == value(break straight)
-# when card height is controlled), so MCTS dismantled combos freely. These let
-# policy + value SEE combo potential and learn that breaking it drops value.
-# Default OFF so existing 306-dim deployments keep loading; training and the
-# wrapper switch it on (the wrapper auto-detects from the checkpoint dim, so the
-# user sets no flag). Toggle at runtime via set_combo().
+# V9c: GRAYSCALE combo-strength features — for my best play of each type
+# (single/pair/straight/full house/quad/straight-flush; NO flush in this ruleset)
+# a [0,1] "how strong / how bad to break" score = intrinsic(type+rank) ratcheted
+# toward 1.0 as the board makes a beat impossible (dominance.play_strengths). This
+# REPLACES V9b's ungraded raw counts (which couldn't tell a 9-quad from a junk
+# straight and didn't help). Default OFF so 306-dim deployments keep loading;
+# training/wrapper switch it on (auto-detected from checkpoint width — no flag).
 COMBO_ON = _os.environ.get("BIG2_COMBO") == "1"
-_COMBO_DIM = 8 if COMBO_ON else 0
+_COMBO_DIM = 6 if COMBO_ON else 0
 
 HIST_STEP_DIM = 29    # per-step history encoding
 HISTORY_LEN = 196     # theoretical max game length (49 plays × 4 steps/play)
@@ -40,7 +39,7 @@ def set_combo(on: bool) -> None:
     constructing any model / encoding (training: on; wrapper: per checkpoint)."""
     global COMBO_ON, _COMBO_DIM, STATIC_DIM, TOTAL_DIM
     COMBO_ON = bool(on)
-    _COMBO_DIM = 8 if COMBO_ON else 0
+    _COMBO_DIM = 6 if COMBO_ON else 0
     STATIC_DIM = 302 + _DOMINANCE_DIM + _COMBO_DIM
     TOTAL_DIM = STATIC_DIM + GRU_HIDDEN
 
@@ -106,44 +105,18 @@ def _last_hand_features(hand) -> tuple:
     return type_idx, _card_rank(hand[-1]), _card_suit(hand[-1])
 
 
-def combo_features(hand) -> np.ndarray:
-    """8 normalized combo-structure features of `hand` (card_ids). Cheap (rank/
-    suit histograms only) so it can run on every MCTS expansion. Lets the net
-    value preserving 5-card combos instead of shedding cards out of them.
+_COMBO_TYPES = ("single", "pair", "straight", "full_house", "quad", "straight_flush")
 
-      0 #pairs/4      1 #triples/3   2 #quads/2     3 #flush-suits(>=5)/2
-      4 #straight-windows/5          5 has full house (triple+other pair)
-      6 max same-suit count /13      7 longest consecutive-rank run /13
-    """
-    feat = np.zeros(8, dtype=np.float32)
-    if len(hand) == 0:
-        return feat
-    rank_cnt = np.zeros(14, dtype=np.int32)   # 1..13
-    suit_cnt = np.zeros(5, dtype=np.int32)    # 1..4 (0 unused)
-    for c in hand:
-        c = int(c)
-        rank_cnt[(c - 1) // 4 + 1] += 1
-        suit_cnt[(c - 1) % 4 + 1] += 1
-    pairs = int((rank_cnt >= 2).sum())
-    triples = int((rank_cnt >= 3).sum())
-    quads = int((rank_cnt >= 4).sum())
-    flush_suits = int((suit_cnt >= 5).sum())
-    present = rank_cnt[1:14] > 0
-    windows = sum(1 for s in range(0, 9) if present[s:s + 5].all())  # 5 consec ranks
-    full_house = 1.0 if (triples >= 1 and pairs >= 2) else 0.0  # triple + a different pair
-    run = best = 0
-    for r in range(13):
-        run = run + 1 if present[r] else 0
-        best = max(best, run)
-    feat[0] = min(pairs, 4) / 4.0
-    feat[1] = min(triples, 3) / 3.0
-    feat[2] = min(quads, 2) / 2.0
-    feat[3] = min(flush_suits, 2) / 2.0
-    feat[4] = min(windows, 5) / 5.0
-    feat[5] = full_house
-    feat[6] = int(suit_cnt.max()) / 13.0
-    feat[7] = best / 13.0
-    return feat
+
+def combo_features(my_hand, played) -> np.ndarray:
+    """6 GRAYSCALE [0,1] strengths — my best play of each type, ratcheted toward
+    1.0 as the board makes it unbeatable (dominance.play_strengths). Order:
+    single, pair, straight, full house, quad, straight-flush. Lets policy+value
+    distinguish a 9-quad (~0.9, must keep) from a junk straight (~0.1) and learn
+    that breaking a high-strength combo drops value."""
+    from engine import dominance as _dom
+    s = _dom.play_strengths(my_hand, played)
+    return np.array([s.get(k, 0.0) for k in _COMBO_TYPES], dtype=np.float32)
 
 
 def encode_static(game, player: int) -> np.ndarray:
@@ -242,10 +215,13 @@ def encode_static(game, player: int) -> np.ndarray:
             _dom.dominance_features(my_hand, played), dtype=np.float32)
         idx += 4
 
-    # ── V9b combo-structure features ────────────────────────────────────────
+    # ── V9c grayscale combo-strength features ───────────────────────────────
     if COMBO_ON:
-        feat[idx: idx + 8] = combo_features(g.currentHands[player])
-        idx += 8
+        my_hand = [int(c) for c in g.currentHands[player]]
+        played = [c for p in range(4)
+                  for c in range(1, 53) if g.cardsPlayed[p][c - 1]]
+        feat[idx: idx + 6] = combo_features(my_hand, played)
+        idx += 6
 
     assert idx == STATIC_DIM, f"Static dim mismatch: {idx} != {STATIC_DIM}"
     return feat
