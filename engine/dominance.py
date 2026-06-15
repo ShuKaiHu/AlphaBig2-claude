@@ -145,6 +145,85 @@ def best_straight_is_nuts(my_hand, played) -> bool:
     return not higher_straight_possible(unseen, max(my_tops))
 
 
+def _higher_quad_possible(unseen, my_quad_rank) -> bool:
+    cnt = {}
+    for c in unseen:
+        cnt[_rank(c)] = cnt.get(_rank(c), 0) + 1
+    return any(r > my_quad_rank and n >= 4 for r, n in cnt.items())
+
+
+def combo_strength(my_hand, played) -> float:
+    """Grayscale [0,1] strength of my BEST 5-card combo — "how safe is it to hold
+    / how bad to break it". NOT binary nuts: a four-of-a-kind is intrinsically a
+    monster (~0.88) even though a straight-flush beats it, and ratchets toward
+    1.0 as the board makes beats impossible.
+
+        strength = intrinsic + (1 - intrinsic) * safety
+        intrinsic = type-tier + within-type rank (opponent-independent)
+        safety    = 1 - (beat-categories still possible) / (beat-categories total)
+
+    Returns the max over every 5-card combo my hand can form (0 if none)."""
+    from collections import Counter
+    hand = [int(c) for c in my_hand]
+    unseen = unseen_cards(my_hand, played)
+    rc = Counter(_rank(c) for c in hand)
+    by_suit = {1: [], 2: [], 3: [], 4: []}
+    for c in hand:
+        by_suit[(c - 1) % 4 + 1].append(_rank(c))
+
+    # board-wide over-trump possibilities (shared across combo types)
+    any_flush = flush_possible(unseen)
+    any_fh = full_house_possible(unseen)
+    any_bomb = bomb_possible(unseen)
+    any_sf = straight_flush_possible(unseen)
+
+    def score(intrinsic, beats):
+        total = max(1, len(beats))
+        safety = 1.0 - sum(1 for b in beats if b) / total
+        return intrinsic + (1.0 - intrinsic) * safety
+
+    best = 0.0
+
+    # straight-flush: the top of the hierarchy, beaten only by a higher SF
+    for s, ranks in by_suit.items():
+        rset = set(ranks)
+        for win in _STRAIGHT_WINDOWS:
+            if all(r in rset for r in win):
+                intrinsic = 0.95 + 0.05 * (win[-1] / 13.0)
+                # only a higher straight-flush beats it (rare); approximate the
+                # risk by whether ANY straight-flush is still possible unseen.
+                best = max(best, score(intrinsic, [any_sf]))
+
+    # four-of-a-kind: beaten by higher quad or straight-flush
+    for r, n in rc.items():
+        if n >= 4:
+            intrinsic = 0.85 + 0.13 * (r / 13.0)
+            best = max(best, score(intrinsic,
+                       [_higher_quad_possible(unseen, r), any_sf]))
+
+    # full house: beaten by higher FH, quad, SF
+    triples = [r for r, n in rc.items() if n >= 3]
+    pairs = [r for r, n in rc.items() if n >= 2]
+    for t in triples:
+        if any(p != t for p in pairs):
+            intrinsic = 0.35 + 0.20 * (t / 13.0)
+            best = max(best, score(intrinsic, [any_fh, any_bomb, any_sf]))
+
+    # straight: beaten by higher straight, ANY flush/FH/quad/SF
+    for top in _my_straight_top_ranks(my_hand):
+        intrinsic = 0.05 + 0.15 * (top / 13.0)
+        best = max(best, score(intrinsic, [
+            higher_straight_possible(unseen, top), any_flush, any_fh, any_bomb, any_sf]))
+
+    # flush: beaten by higher flush, ANY FH/quad/SF
+    for s, ranks in by_suit.items():
+        if len(ranks) >= 5:
+            intrinsic = 0.20 + 0.12 * (max(ranks) / 13.0)
+            best = max(best, score(intrinsic, [any_flush, any_fh, any_bomb, any_sf]))
+
+    return float(best)
+
+
 def dominance_features(my_hand, played):
     """Compact dominance feature vector for the model / decision logic:
        [0] has at least one unbeatable single          (1/0)
