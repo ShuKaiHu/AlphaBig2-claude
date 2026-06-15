@@ -87,14 +87,11 @@ def best_pair_is_nuts(my_hand, played) -> bool:
     return best_my > best_opp
 
 
-def flush_possible(unseen) -> bool:
-    """An opponent could hold a flush iff some suit has >= 5 unseen cards."""
-    by_suit = {1: 0, 2: 0, 3: 0, 4: 0}
-    for c in unseen:
-        by_suit[(c - 1) % 4 + 1] += 1
-    return any(v >= 5 for v in by_suit.values())
-
-
+# NOTE: this ruleset (rules.md / enumerateOptions) has NO plain flush — the only
+# 5-card plays are straight / full house / four-of-a-kind / straight-flush, and
+# every type is compared SAME-TYPE only, except a quad (鐵支) or straight-flush
+# (同花順) may override ANY type. So beat-lists below never include "flush" and
+# never cross types (a straight is NOT beaten by a full house).
 def full_house_possible(unseen) -> bool:
     """An opponent could hold a full house iff some rank has >=3 unseen and a
     DIFFERENT rank has >=2 unseen (triple + pair)."""
@@ -139,8 +136,9 @@ def best_straight_is_nuts(my_hand, played) -> bool:
     if not my_tops:
         return False
     unseen = unseen_cards(my_hand, played)
-    if (bomb_possible(unseen) or straight_flush_possible(unseen)
-            or flush_possible(unseen) or full_house_possible(unseen)):
+    # A straight is beaten only by a higher straight, a quad, or a straight-flush
+    # (same-type rule + overrides). NOT by a flush (none exist) or a full house.
+    if bomb_possible(unseen) or straight_flush_possible(unseen):
         return False
     return not higher_straight_possible(unseen, max(my_tops))
 
@@ -152,76 +150,85 @@ def _higher_quad_possible(unseen, my_quad_rank) -> bool:
     return any(r > my_quad_rank and n >= 4 for r, n in cnt.items())
 
 
-def combo_strength(my_hand, played) -> float:
-    """Grayscale [0,1] strength of my BEST 5-card combo — "how safe is it to hold
-    / how bad to break it". NOT binary nuts: a four-of-a-kind is intrinsically a
-    monster (~0.88) even though a straight-flush beats it, and ratchets toward
-    1.0 as the board makes beats impossible.
+def _strength(intrinsic, beats):
+    """intrinsic ratcheted toward 1.0 as fewer beats remain possible."""
+    total = max(1, len(beats))
+    safety = 1.0 - sum(1 for b in beats if b) / total
+    return intrinsic + (1.0 - intrinsic) * safety
 
-        strength = intrinsic + (1 - intrinsic) * safety
-        intrinsic = type-tier + within-type rank (opponent-independent)
-        safety    = 1 - (beat-categories still possible) / (beat-categories total)
 
-    Returns the max over every 5-card combo my hand can form (0 if none)."""
+def play_strengths(my_hand, played) -> dict:
+    """Grayscale [0,1] strength of my BEST play of EACH type — "how safe to make /
+    how bad to break". strength = intrinsic(type-tier + within-type rank) ratcheted
+    toward 1.0 as the board makes a beat impossible. Same-type comparison only;
+    quad (鐵支) and straight-flush (同花順) can override ANY type; NO plain flush.
+    Returns {type: strength} over the types my hand can form."""
     from collections import Counter
     hand = [int(c) for c in my_hand]
     unseen = unseen_cards(my_hand, played)
     rc = Counter(_rank(c) for c in hand)
+    un_rc = Counter(_rank(c) for c in unseen)
     by_suit = {1: [], 2: [], 3: [], 4: []}
     for c in hand:
         by_suit[(c - 1) % 4 + 1].append(_rank(c))
+    bomb = bomb_possible(unseen)              # quad override possible
+    sf = straight_flush_possible(unseen)      # SF override possible
+    out = {}
 
-    # board-wide over-trump possibilities (shared across combo types)
-    any_flush = flush_possible(unseen)
-    any_fh = full_house_possible(unseen)
-    any_bomb = bomb_possible(unseen)
-    any_sf = straight_flush_possible(unseen)
+    # single: beaten by a higher single, or quad/SF override. ♠2 (id 52) is the
+    # global nuts — beats everything (rules.md).
+    if hand:
+        my_max = max(hand)
+        out["single"] = 1.0 if my_max == 52 else _strength(
+            _rank(my_max) / 13.0, [any(c > my_max for c in unseen), bomb, sf])
 
-    def score(intrinsic, beats):
-        total = max(1, len(beats))
-        safety = 1.0 - sum(1 for b in beats if b) / total
-        return intrinsic + (1.0 - intrinsic) * safety
+    # pair: beaten by a higher pair, or quad/SF override.
+    my_pairs = [r for r, n in rc.items() if n >= 2]
+    if my_pairs:
+        best = max(my_pairs)
+        out["pair"] = _strength(best / 13.0,
+                                [any(r > best and n >= 2 for r, n in un_rc.items()), bomb, sf])
 
-    best = 0.0
+    # straight: beaten by a higher straight, or quad/SF override (NOT FH/flush).
+    tops = _my_straight_top_ranks(my_hand)
+    if tops:
+        top = max(tops)
+        out["straight"] = _strength(0.05 + 0.15 * (top / 13.0),
+                                    [higher_straight_possible(unseen, top), bomb, sf])
 
-    # straight-flush: the top of the hierarchy, beaten only by a higher SF
-    for s, ranks in by_suit.items():
-        rset = set(ranks)
-        for win in _STRAIGHT_WINDOWS:
-            if all(r in rset for r in win):
-                intrinsic = 0.95 + 0.05 * (win[-1] / 13.0)
-                # only a higher straight-flush beats it (rare); approximate the
-                # risk by whether ANY straight-flush is still possible unseen.
-                best = max(best, score(intrinsic, [any_sf]))
+    # full house: beaten by a higher full house, or quad/SF override.
+    triples = [r for r, n in rc.items() if n >= 3]
+    pairs_av = [r for r, n in rc.items() if n >= 2]
+    for t in triples:
+        if any(p != t for p in pairs_av):
+            higher_fh = (any(r > t and n >= 3 for r, n in un_rc.items())
+                         and full_house_possible(unseen))
+            out["full_house"] = max(out.get("full_house", 0.0),
+                                    _strength(0.35 + 0.20 * (t / 13.0), [higher_fh, bomb, sf]))
 
-    # four-of-a-kind: beaten by higher quad or straight-flush
+    # four-of-a-kind: beaten by a higher quad or a straight-flush.
     for r, n in rc.items():
         if n >= 4:
-            intrinsic = 0.85 + 0.13 * (r / 13.0)
-            best = max(best, score(intrinsic,
-                       [_higher_quad_possible(unseen, r), any_sf]))
+            out["quad"] = max(out.get("quad", 0.0),
+                              _strength(0.85 + 0.13 * (r / 13.0),
+                                        [_higher_quad_possible(unseen, r), sf]))
 
-    # full house: beaten by higher FH, quad, SF
-    triples = [r for r, n in rc.items() if n >= 3]
-    pairs = [r for r, n in rc.items() if n >= 2]
-    for t in triples:
-        if any(p != t for p in pairs):
-            intrinsic = 0.35 + 0.20 * (t / 13.0)
-            best = max(best, score(intrinsic, [any_fh, any_bomb, any_sf]))
+    # straight-flush: beaten only by a higher straight-flush.
+    for ranks in by_suit.values():
+        rset = set(ranks)
+        for win in _STRAIGHT_WINDOWS:
+            if all(rr in rset for rr in win):
+                out["straight_flush"] = max(out.get("straight_flush", 0.0),
+                                            _strength(0.95 + 0.05 * (win[-1] / 13.0), [sf]))
+    return out
 
-    # straight: beaten by higher straight, ANY flush/FH/quad/SF
-    for top in _my_straight_top_ranks(my_hand):
-        intrinsic = 0.05 + 0.15 * (top / 13.0)
-        best = max(best, score(intrinsic, [
-            higher_straight_possible(unseen, top), any_flush, any_fh, any_bomb, any_sf]))
 
-    # flush: beaten by higher flush, ANY FH/quad/SF
-    for s, ranks in by_suit.items():
-        if len(ranks) >= 5:
-            intrinsic = 0.20 + 0.12 * (max(ranks) / 13.0)
-            best = max(best, score(intrinsic, [any_flush, any_fh, any_bomb, any_sf]))
-
-    return float(best)
+def combo_strength(my_hand, played) -> float:
+    """Max grayscale strength over my best 5-card combo (straight/FH/quad/SF).
+    See play_strengths for all play types (single/pair/...)."""
+    s = play_strengths(my_hand, played)
+    return max([s.get(k, 0.0)
+                for k in ("straight", "full_house", "quad", "straight_flush")] + [0.0])
 
 
 def dominance_features(my_hand, played):
