@@ -357,3 +357,25 @@ V9c 真人棋譜,把「-1 打平」推成「正分贏真人」。
 成立 —— 沒有離線證據支持花線上預算測 V9b。)
 
 工具:combo_break_play.py(離線 MCTS 實打的拆組合率)。
+
+---
+
+## V9c 離線結果 (2026-06-16) — 強對手+灰階特徵:feature 終於「被學起來」
+
+= V9a + 灰階 combo-strength 特徵 + --strong-opp-ratio 0.5(座位2-4 = smart heuristic)。
+saved/v9c_combo_strongopp_deploy.pt(312-dim model_state + value_state)。
+
+| 指標 | V9c | V9a | V9b |
+|------|-----|-----|-----|
+| value 盲目診斷(保留>破壞順) | **57%**(高順70%/低順38%) | 44% | 47% |
+| 可避免的拆組合(combo_break_play) | **29%** | 41% | 43% |
+| 拆組合率(總) | 64% | 66% | 72% |
+| MCTS-80 vs heuristic | **+6.93±2.18** | +5.64 | +2.86 |
+
+**重大:value-blindness 從 ~擲銅板(44/47%)→ 57%,高順子拉到 70%。這是 V9 系列第一次
+combo feature 真的被模型用起來** → 印證 V9b 的死因是「缺訊號(弱對手不懲罰)」,加了強對手
+這個訊號後,同樣的特徵就學得起來。「可避免拆組合」41%→29% 是最貼合使用者原始抱怨的改善。
+
+**誠實 caveat**:① MCTS-vs-heuristic +6.93 部分是因為 V9c **就是對 smart heuristic 訓練的**
+→ 可能 overfit 到 heuristic 打法,不一定對真人更好(老問題)。② 鐵律:離線≠線上。
+→ **最終仍待使用者線上實測**(對照 V9a+v2 的 130 局 -3.80)。
