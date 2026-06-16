@@ -584,6 +584,14 @@ class big2Game:
                     index = enumerateOptions.action_index_from_cards(cards)
                     availableActions[index] = 1
 
+            # Voluntary pass is ALWAYS legal when following (control == 0) and the
+            # player has not already passed this round. Holding cards/combos by
+            # passing on a beatable hand is core Big 2 strategy — without this the
+            # agent is FORCED to beat whenever it can, so MCTS never even explores
+            # PASS and breaks pairs/straights/full-houses to dump a forced play.
+            # (The early returns above — empty hand, already passed — correctly
+            # leave the mask all-zeros, i.e. a forced pass with no choice.)
+            availableActions[enumerateOptions.passInd] = 1
             return availableActions
         
         
