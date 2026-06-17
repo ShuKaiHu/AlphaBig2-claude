@@ -72,6 +72,60 @@ def _heuristic_action(env: Big2Env) -> int:
         return int(non_pass[0])
 
 
+def _combo_aware_heuristic_action(env: Big2Env) -> int:
+    """Like _smart_heuristic_action, but when FOLLOWING a SMALL (single/pair)
+    lead it will PASS rather than break a valuable 5-card combo to win a cheap
+    trick — the human 'hold your straight/full-house/bomb' instinct.
+
+    This is the V9e enabler: pure/weak-heuristic self-play never punishes
+    combo-wasting (vs opponents that can't capitalise, breaking a combo to grab
+    a small trick is locally free), so V6–V9d learned to break combos / never
+    pass. An opponent (and BC target) that itself HOLDS combos both demonstrates
+    strategic passing AND plays better, so wasting a combo finally costs the
+    learner reward.
+
+    Lead (control==1): identical to _smart (shed lowest single, keep combos).
+    Follow (control==0): lowest winning play that does NOT shatter a strong
+      (>=0.5) 5-card combo; if every winning play would, hold (PASS).
+    """
+    import enumerateOptions as _eo
+    from engine.dominance import combo_strength
+    valid = np.flatnonzero(env.get_valid_actions())
+    non_pass = valid[valid != PASS_IDX]
+    if len(non_pass) == 0:
+        return PASS_IDX
+    game = env.game
+    me = env.current_player
+    if game.control == 1:
+        singles = [a for a in non_pass if a < _eo.PAIR_OFFSET]
+        if singles:
+            return int(min(singles))
+        pairs = [a for a in non_pass if _eo.PAIR_OFFSET <= a < _eo.FIVE_OFFSET]
+        if pairs:
+            return int(min(pairs))
+        return int(min(non_pass))
+    # Follow: only run the (cloning) combo check vs a small lead while actually
+    # holding a strong combo — otherwise just minimal-win like _smart.
+    prev_hand = game.handsPlayed[game.goIndex - 1].hand
+    if len(prev_hand) <= 2:
+        my_hand = [int(c) for c in game.currentHands[me]]
+        played = [c for p in range(4) for c in range(1, 53)
+                  if game.cardsPlayed[p][c - 1]]
+        before = combo_strength(my_hand, played)
+        if before >= 0.5:
+            for cand in sorted(int(a) for a in non_pass):
+                e2 = env.clone()
+                e2.step(cand)
+                after = combo_strength(
+                    [int(c) for c in e2.game.currentHands[me]],
+                    [c for p in range(4) for c in range(1, 53)
+                     if e2.game.cardsPlayed[p][c - 1]])
+                if before - after < 0.3:      # this play keeps the combo intact
+                    return cand
+            return PASS_IDX                    # every win shatters the combo → hold
+    return int(non_pass.min())
+
+
 def _model_action(model, env: Big2Env) -> int:
     """Greedy policy from model (no MCTS) for opponent pool agents."""
     game = env.game
@@ -108,6 +162,7 @@ def run_episode(
     opponent=None,             # optional dict {player:callable} to override seats
     bc_mode: bool = False,
     value_model=None,          # optional Big2ValueNet (V9): full-info MCTS leaf eval
+    bc_action_fn=None,         # heuristic cloned in bc_mode (default: _heuristic_action)
 ) -> tuple:
     """
     Run ONE true 4-player self-play episode (max^n MCTS).
@@ -169,7 +224,7 @@ def run_episode(
                 continue
 
             if bc_mode:
-                action = _heuristic_action(env)
+                action = (bc_action_fn or _heuristic_action)(env)
                 visits = np.zeros(env.ACTION_SIZE, dtype=np.float32)
                 visits[action] = 1.0
                 root_value = None

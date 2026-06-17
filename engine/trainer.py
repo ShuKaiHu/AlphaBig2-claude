@@ -16,7 +16,10 @@ import torch
 import torch.nn.functional as F
 
 from engine.model import Big2Net, Big2ValueNet
-from engine.self_play import run_episode, make_pool_opponent, _smart_heuristic_action
+from engine.self_play import (
+    run_episode, make_pool_opponent, _smart_heuristic_action,
+    _combo_aware_heuristic_action,
+)
 from engine.replay_buffer import ReplayBuffer
 from engine.evaluator import evaluate_vs_heuristic
 
@@ -62,6 +65,12 @@ def train(
                                     # cards, preserves combos, minimal-win) so the
                                     # learner (seat 1, MCTS) faces an opponent that
                                     # PUNISHES the mistakes pure self-play never did.
+    combo_aware_opp: bool = False,  # V9e: use the COMBO-AWARE heuristic (holds a
+                                    # strong combo / passes a small lead rather than
+                                    # shattering it) for BOTH the BC target and the
+                                    # strong opponent — so the learner is taught &
+                                    # punished into holding combos (V9d showed pass
+                                    # ABILITY alone collapsed to never-pass).
     full_info_value: bool = False,  # V9: train a god-view Big2ValueNet (input =
                                     # static + true opponent hands) and use it for
                                     # MCTS leaf evaluation in self-play. The policy
@@ -149,7 +158,9 @@ def train(
                 # opponent that keeps big cards / preserves combos / minimal-wins,
                 # so it PUNISHES wasting big cards & breaking combos (the signal
                 # pure self-play lacked). Only seat 1 contributes training data.
-                opp = {s: _smart_heuristic_action for s in (2, 3, 4)}
+                strong_fn = (_combo_aware_heuristic_action if combo_aware_opp
+                             else _smart_heuristic_action)
+                opp = {s: strong_fn for s in (2, 3, 4)}
             elif (league and opponent_pool and not use_bc
                     and np.random.rand() < league_ratio):
                 opp = {s: make_pool_opponent(np.random.choice(opponent_pool))
@@ -161,6 +172,8 @@ def train(
                 opponent=opp,
                 bc_mode=use_bc,
                 value_model=value_net,
+                bc_action_fn=(_combo_aware_heuristic_action if combo_aware_opp
+                              else None),
             )
             buffer.add_episode(data)
             ep_rewards.append(reward)
@@ -342,6 +355,9 @@ def _parse_args():
     p.add_argument("--strong-opp-ratio", type=float, default=0.0, dest="strong_opp_ratio",
                    help="V9c: fraction of episodes with seats 2-4 = smart heuristic "
                         "(punishes wasted big cards / broken combos)")
+    p.add_argument("--combo-aware-opp", action="store_true", dest="combo_aware_opp",
+                   help="V9e: BC target + strong opponent HOLD strong combos / pass small "
+                        "leads (teaches & punishes the learner into holding combos)")
     p.add_argument("--checkpoint-dir", type=str, default=CHECKPOINT_DIR, dest="checkpoint_dir",
                    help="Where to write latest.pt/best.pt (use a separate dir to protect deployment)")
     p.add_argument("--torch-threads", type=int, default=3,
@@ -378,4 +394,5 @@ if __name__ == "__main__":
         full_info_value=args.full_info_value,
         combo_features=args.combo_features,
         strong_opp_ratio=args.strong_opp_ratio,
+        combo_aware_opp=args.combo_aware_opp,
     )
