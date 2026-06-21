@@ -24,6 +24,25 @@ import os
 
 ART = "/Users/shukaihu/Code_Project_Local/Big2VisionAgent-claude/artifacts"
 OUT = os.path.join(os.path.dirname(__file__), "data", "online_games.jsonl")
+VERSIONS = os.path.join(os.path.dirname(__file__), "data", "run_versions.json")
+
+
+def _agent_label(run, overrides):
+    """What our agent was in this run. Explicit override wins; else infer from the
+    run.log ML note (mcts=old AlphaZero line, cardaware[+search]=PPO line)."""
+    if run in overrides:
+        return overrides[run]
+    try:
+        txt = open(os.path.join(ART, run, "autoplay_agent", "run.log")).read()
+    except Exception:
+        return "ours"
+    if "ML: mcts" in txt:
+        return "alpha"
+    if "cardaware+search" in txt:
+        return "cardaware+search"
+    if "ML: cardaware" in txt:
+        return "cardaware"
+    return "ours"
 
 _BV_SUIT = {"1": 4, "2": 3, "3": 2, "4": 1}
 _BV_RANK = {"3": 1, "4": 2, "5": 3, "6": 4, "7": 5, "8": 6, "9": 7,
@@ -154,6 +173,18 @@ def main():
                 master[gid] = g
                 added += 1
 
+    # (re)label seats for every game: our_seat -> agent version, others -> human.
+    overrides = json.load(open(VERSIONS)) if os.path.exists(VERSIONS) else {}
+    label_cache = {}
+    for g in master.values():
+        run = g.get("run", "")
+        if run not in label_cache:
+            label_cache[run] = _agent_label(run, overrides)
+        seats = ["human", "human", "human", "human"]
+        if g.get("our_seat") is not None:
+            seats[g["our_seat"]] = label_cache[run]
+        g["seats"] = seats
+
     games = sorted(master.values(), key=lambda x: (x.get("run", ""), x.get("id", "")))
     with open(OUT, "w") as f:
         for g in games:
@@ -163,6 +194,11 @@ def main():
     print(f"runs scanned: {len(runs)}")
     print(f"previous master: {prev} games | new added: {added} | TOTAL: {len(games)} games")
     print(f"TOTAL decision points (plays+passes): {n_dec}  (avg {n_dec/max(len(games),1):.1f}/game)")
+    from collections import Counter
+    by_agent = Counter(g["seats"][g["our_seat"]] for g in games if g.get("our_seat") is not None)
+    human_dec = sum(1 for g in games for p in g["plays"] if g["seats"][p["seat"]] == "human")
+    print("games by OUR-agent version:", dict(by_agent))
+    print(f"human decision points (for imitation): {human_dec}")
     print(f"master dataset (accumulating) -> {OUT}")
 
 
