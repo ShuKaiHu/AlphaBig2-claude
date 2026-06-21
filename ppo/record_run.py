@@ -9,9 +9,20 @@ import glob
 import json
 import os
 import sys
+import time
 
 ART = "/Users/shukaihu/Code_Project_Local/Big2VisionAgent-claude/artifacts"
 VERS = os.path.join(os.path.dirname(__file__), "data", "run_versions.json")
+
+
+def _run_epoch(run):
+    """Run dir name is its CREATION timestamp (YYYYMMDD-HHMMSS) — use that, not
+    mtime: a long session's mtime is at its END, which leaked into the next
+    session's window and mis-tagged it (the V2->V3 bug)."""
+    try:
+        return time.mktime(time.strptime(run, "%Y%m%d-%H%M%S"))
+    except Exception:
+        return 0.0
 
 
 def main():
@@ -20,8 +31,8 @@ def main():
     ov = json.load(open(VERS)) if os.path.exists(VERS) else {}
     n = 0
     for d in glob.glob(os.path.join(ART, "*", "autoplay_agent")):
-        if os.path.getmtime(d) >= since - 5:
-            run = d.split("/artifacts/")[1].split("/")[0]
+        run = d.split("/artifacts/")[1].split("/")[0]
+        if _run_epoch(run) >= since - 60:   # tag only runs CREATED at/after launch
             ov[run] = label
             n += 1
     os.makedirs(os.path.dirname(VERS), exist_ok=True)
