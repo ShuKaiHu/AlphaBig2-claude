@@ -31,4 +31,5 @@ ppo/human_games.jsonl
 # accumulating human-game dataset IS tracked (durable); other scratch in data/ is not
 ppo/data/*
 !ppo/data/online_games.jsonl
+!ppo/data/run_versions.json
 !ppo/data/README.md
