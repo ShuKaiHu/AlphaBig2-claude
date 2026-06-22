@@ -12,7 +12,7 @@ import statistics as st
 
 ART = "/Users/shukaihu/Code_Project_Local/Big2VisionAgent-claude/artifacts"
 VERS = os.path.join(os.path.dirname(__file__), "data", "run_versions.json")
-ORDER = ["V1", "V2", "V3", "V4"]
+ORDER = ["V1", "V2", "V3", "V4", "V5"]
 
 
 def main():
