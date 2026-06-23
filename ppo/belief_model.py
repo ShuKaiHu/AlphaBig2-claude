@@ -23,6 +23,18 @@ D = 64    # card embedding dim
 E = 256   # state / query dim
 
 
+def unseen_mask_from_obs(obs):
+    """(52,) 1 for cards that COULD be an opponent's (not ours, not played)."""
+    own = set(int(c) for c in obs["hand_ids"] if c > 0)
+    seen = set(int(i) for i in np.flatnonzero(obs["seen"]))
+    m = np.ones(52, dtype=np.float32)
+    for c in own:
+        m[c - 1] = 0.0
+    for i in seen:
+        m[i] = 0.0
+    return m
+
+
 class BeliefNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -78,6 +90,5 @@ def belief_bce(logits, target, bmask):
 @torch.no_grad()
 def belief_from_obs(net, st, device="cpu"):
     """(3,52) P(opp i holds card c), masked to unseen — for search/determinization."""
-    from ppo.network_v6 import unseen_mask_from_obs
     logits = net(_to_batch([st], device))
     return (torch.sigmoid(logits)[0].cpu().numpy()) * unseen_mask_from_obs(st)
