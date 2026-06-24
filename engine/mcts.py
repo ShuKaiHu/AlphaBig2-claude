@@ -6,6 +6,13 @@ import time
 import numpy as np
 from engine.features import encode_static, encode_history_steps, encode_opp_hands
 
+# Hard cap on simulations in time-limited (deployment) MCTS. Each tree node holds
+# one cloned env, so an uncapped time budget on cheap states explodes the tree
+# (observed 585k nodes → ~2GB → OOM SIGKILL). A few thousand sims already
+# converge Big2's small per-move action space. Only applies to time_limit runs;
+# training uses the fixed n_simulations loop and is unaffected.
+MAX_TIME_LIMITED_SIMS = 8000
+
 
 class MCTSNode:
     __slots__ = (
@@ -105,9 +112,19 @@ class MCTS:
         self._expand(root)   # model forward pass; stores priors, no child cloning
 
         if time_limit is not None:
+            # Cap simulations even under a time budget. Lazy expansion keeps ONE
+            # cloned env per tree node, so #nodes ≈ #sims; on cheap states (few
+            # legal actions, fast terminals — common late-game / pass-heavy) a
+            # 0.25s budget otherwise runs hundreds of thousands of sims (observed
+            # up to 585k), building a 585k-node tree that spikes wrapper memory to
+            # ~2GB → OOM SIGKILL(-9). The visit distribution for Big2's small
+            # per-move action space converges long before this cap, so it costs no
+            # strength while bounding peak memory to a few tens of MB.
             deadline = time.time() + time_limit
-            while time.time() < deadline:
+            sims = 0
+            while time.time() < deadline and sims < MAX_TIME_LIMITED_SIMS:
                 self._simulate(root)
+                sims += 1
         else:
             for _ in range(self.n_simulations):
                 self._simulate(root)
