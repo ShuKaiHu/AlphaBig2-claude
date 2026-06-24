@@ -1,0 +1,55 @@
+{
+  "_doc": "Opponent pool registry. See TRAINING_PLAN.md for the full logic. Each member is a FROZEN checkpoint usable as a league opponent (ppo_trainer.py --pool-ckpts). GOAL: bias the pool toward HUMAN-LIKE opponents so the trained agent learns to beat humans. Add a member by appending to 'members' after measuring its humanness + strength. Paths are relative to ppo/. Load weights via torch.load(path)['model'] using the listed 'class'.",
+  "humanness_metric": "BC top-1 match: fraction of held-out REAL human moves the model would make (greedy) on the same half-masked state. Higher = more human-like = preferred. Measure as train_bc.py reports 'val top1' over held-out human decisions.",
+  "selection_principle": "Prefer high-humanness members; keep a few self-play members for variety. A new member is worth adding if it is MORE human-like OR genuinely different/stronger than existing members. Future: humanness-weighted sampling in collect() (see TRAINING_PLAN.md roadmap).",
+  "members": [
+    {
+      "name": "PPO_V4_init", "file": "checkpoints/saved/PPO_V4_init.pt",
+      "arch": "cardaware", "class": "CardAwareActorCritic",
+      "source": "human-BC", "humanness": 0.76, "humanness_basis": "BC val top1 (~76% human-move match)",
+      "date_added": "2026-06-21", "trained_on": "human (15.8k decisions, pure imitation)",
+      "notes": "MOST human-like member. Weak standalone (overfits vs bots) but the ideal human-like opponent."
+    },
+    {
+      "name": "PPO_V6", "file": "checkpoints/saved/PPO_V6.pt",
+      "arch": "v6", "class": "CardAwareV6",
+      "source": "human-BC", "humanness": 0.74, "humanness_basis": "BC val top1 0.739 (ep20)",
+      "date_added": "2026-06-22", "trained_on": "human (BC policy + belief, 6x capacity)",
+      "notes": "Human-like + has belief head. NOT yet loadable as a frozen pool opponent: 'v6' arch needs a policies.py adapter (see roadmap)."
+    },
+    {
+      "name": "PPO_V4", "file": "checkpoints/saved/PPO_V4.pt",
+      "arch": "cardaware", "class": "CardAwareActorCritic",
+      "source": "human-BC->RL", "humanness": null, "humanness_basis": "unmeasured (RL drifts from human style; measure before relying on it)",
+      "date_added": "2026-06-21", "trained_on": "human imitation warm-start -> league RL",
+      "notes": "Our best online policy base (V5 = this + uniform PIMC search, -3.78/round @50)."
+    },
+    {
+      "name": "PPO_V3", "file": "checkpoints/saved/PPO_V3.pt",
+      "arch": "cardaware", "class": "CardAwareActorCritic",
+      "source": "selfplay-league", "humanness": "low", "humanness_basis": "self-play style, unmeasured",
+      "date_added": "2026-06-20", "trained_on": "league self-play (warm-start V1, pool V1+snapshots)",
+      "notes": "Kept for variety/robustness, not for humanness. Most consistent online (std 9)."
+    },
+    {
+      "name": "PPO_V1", "file": "checkpoints/saved/PPO_V1.pt",
+      "arch": "cardaware", "class": "CardAwareActorCritic",
+      "source": "selfplay", "humanness": "low", "humanness_basis": "self-play style, unmeasured",
+      "date_added": "2026-06-19", "trained_on": "pure current-policy self-play (base)",
+      "notes": "Original self-play base. PPO_V2.pt is IDENTICAL weights (V2's strength was runtime search)."
+    }
+  ],
+  "not_pool_opponents": [
+    {
+      "name": "BELIEF", "file": "checkpoints/saved/BELIEF.pt", "class": "BeliefNet",
+      "role": "opponent-hand belief for SEARCH determinization (graft onto AlphaZero Big2ValueNet), NOT a pool opponent",
+      "val_pcount": 0.828, "trained_on": "human showdown data (target=all, 26k decisions)",
+      "notes": "82.8% held-out P@count (chance 33%), 92-94% late-game. Ordering = clockwise-relative; convert to absolute-index when grafting."
+    }
+  ],
+  "runtime_modes_not_files": {
+    "V2": "PPO_V1.pt + 1s PIMC search at inference (no separate weights)",
+    "V5": "PPO_V4.pt + 1s uniform PIMC search at inference (best online so far)",
+    "V6_online": "PPO_V4.pt policy + BELIEF.pt belief-guided PIMC search (BELIEF=1; did NOT beat V5)"
+  }
+}
