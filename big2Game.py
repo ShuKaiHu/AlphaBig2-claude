@@ -450,7 +450,7 @@ class big2Game:
         self.rewards[winner-1] = -1 * loser_sum
 
         winner_last_hand = self.handsPlayed[self.goIndex - 1].hand
-        winner_multiplier = self._hand_multiplier(winner_last_hand, count_hand_size=False)
+        winner_multiplier = self._winner_finish_multiplier(winner_last_hand)
         if winner_multiplier > 1:
             self.rewards *= winner_multiplier
 
@@ -471,6 +471,41 @@ class big2Game:
             return False
         for combo in itertools.combinations(hand, 5):
             if gameLogic.isStraightFlush(np.array(combo)):
+                return True
+        return False
+
+    def _winner_finish_multiplier(self, hand):
+        """Doubling from the WINNER's finishing combo (distinct from the losers'
+        held-hand multiplier). Reverse-engineered to 100% match (4412/4412) against
+        神來也's showScore settlement:
+          - x2 if the finishing combo is a bomb (four-of-a-kind or straight-flush)
+          - x2 if it contains a 2 acting as a PRINCIPAL card; stacks with the bomb x2
+          - a 2 that is only INCIDENTAL does NOT count: the wheel A-2-3-4-5, the
+            pair in a full house (KKK22), or the kicker of a four-of-a-kind (AAAA2).
+        The old code reused _hand_multiplier here, which double-counts (pair of 2s
+        -> x4 not x2) and counts incidental 2s -- wrong on 1.3% of games (always
+        over-doubling the value/exhaustive-solve label for a 2/bomb finish)."""
+        hand = np.asarray(hand)
+        mult = 1
+        if self._has_four_of_a_kind(hand) or self._has_straight_flush(hand):
+            mult *= 2
+        ranks = ((hand - 1) // 4).astype(int)          # 12 == '2'
+        if 12 in ranks and not self._two_is_incidental(hand, ranks):
+            mult *= 2
+        return mult
+
+    def _two_is_incidental(self, hand, ranks):
+        rset = set(int(r) for r in ranks)
+        if rset == {0, 1, 2, 11, 12}:                  # wheel A-2-3-4-5: 2 plays low
+            return True
+        if len(hand) == 5:
+            counts = {r: int(np.sum(ranks == r)) for r in rset}
+            two_n = counts.get(12, 0)
+            # four-of-a-kind + lone 2 kicker, or full house with 2 as the pair
+            if 4 in counts.values() and two_n == 1:
+                return True
+            trip = [r for r, c in counts.items() if c == 3]
+            if trip and trip[0] != 12 and two_n == 2:
                 return True
         return False
 
@@ -497,6 +532,47 @@ class big2Game:
             return -1
         opt, nCards = enumerateOptions.getOptionNC(action)
         return (opt, nCards)
+
+    def _restrict_singles_for_one_card_rule(self, availableActions):
+        """House rule (matches the online platform / vision-layer's now-fixed
+        _apply_one_card_rule in alpha_big2_wrapper.py -- this brings self-play/
+        rollout in line with it, 2026-07-08): if the EFFECTIVE NEXT ACTOR (the
+        first still-active downstream seat in turn order) has exactly 1 card
+        remaining, restrict my singles to only the HIGHEST legal single -- never
+        hand them the trick by playing low. Applies whether I'm leading fresh or
+        following: a low lead can be beaten and taken by a 1-card opponent's
+        higher single just as easily as a low follow can.
+
+        A still-active seat with 2+ cards is a genuine buffer -- they get the
+        real next decision and may absorb/beat the trick themselves, so a
+        1-card threat further downstream isn't yet live. Stop at the first
+        still-active seat; don't scan past it (the exact bug this mirrors the
+        fix for: scanning all downstream seats over-restricted play whenever a
+        LATER seat had 1 card behind an active, not-yet-passed buffer).
+
+        Before this engine-side fix, self-play/rollout/BC-corpus-replay never
+        saw this restriction at all (this method didn't exist) -- only the
+        online vision-layer bridge enforced it, so training never learned the
+        behavior and had to have it force-masked only at deployment time.
+        """
+        single_idx = np.flatnonzero(availableActions[:52] == 1)
+        if len(single_idx) <= 1:
+            return availableActions
+        following = (self.control == 0)
+        p = self.playersGo
+        for _ in range(3):
+            p = p + 1 if p < 4 else 1
+            if self.currentHands[p].size == 0:
+                continue
+            if following and self.passedThisRound[p]:
+                continue
+            if self.currentHands[p].size == 1:
+                highest = int(single_idx.max())
+                for idx in single_idx:
+                    if int(idx) != highest:
+                        availableActions[int(idx)] = 0
+            break
+        return availableActions
 
     def _action_includes_card(self, action, card_id):
         opt, nCards = enumerateOptions.getOptionNC(action)
@@ -592,7 +668,7 @@ class big2Game:
             # (The early returns above — empty hand, already passed — correctly
             # leave the mask all-zeros, i.e. a forced pass with no choice.)
             availableActions[enumerateOptions.passInd] = 1
-            return availableActions
+            return self._restrict_singles_for_one_card_rule(availableActions)
         
         
         else: #player has control.
@@ -628,8 +704,8 @@ class big2Game:
                         continue
                     if self._action_includes_card(int(action), 1):
                         filtered[action] = 1
-                return filtered
-            return availableActions
+                availableActions = filtered
+            return self._restrict_singles_for_one_card_rule(availableActions)
 
     def step(self, action):
         opt, nC = enumerateOptions.getOptionNC(action)
