@@ -37,6 +37,38 @@
       "source": "selfplay", "humanness": "low", "humanness_basis": "self-play style, unmeasured",
       "date_added": "2026-06-19", "trained_on": "pure current-policy self-play (base)",
       "notes": "Original self-play base. PPO_V2.pt is IDENTICAL weights (V2's strength was runtime search)."
+    },
+    {
+      "name": "policy_all", "file": "checkpoints/saved/policy_all.pt",
+      "arch": "cardaware_history", "class": "CardAwareActorCriticHistory",
+      "source": "human-BC (ALL 1455-game corpus, no snapshot restriction)",
+      "humanness": null, "humanness_basis": "unmeasured (has play-history GRU context; not directly comparable to no-history val top1)",
+      "date_added": "2026-07-06", "trained_on": "human imitation, epoch 35 (checkpoint selected by best vs-OPPONENT-POOL score during training)",
+      "notes": "WINNER of a 3-way checkpoint-selection experiment run this session, all identical data/arch/patience, differing ONLY in what training-time metric picked the checkpoint: online avg_score over 100 real games = -6.78 (this, vs-pool selection) vs -9.05 (policy_all_vs1, vs-Smart selection) vs -9.80 (policy_all_minloss, train-to-lowest-loss). CONCLUSION: selecting checkpoints by score vs a diverse opponent pool beats both vs-a-single-fixed-opponent and minimizing training loss -- use vs-pool selection for all future BC/RL checkpoint selection in this project."
+    },
+    {
+      "name": "policy_all_vs1", "file": "checkpoints/saved/policy_all_vs1.pt",
+      "arch": "cardaware_history", "class": "CardAwareActorCriticHistory",
+      "source": "human-BC (ALL 1455-game corpus, same run as policy_all)",
+      "humanness": null, "humanness_basis": "unmeasured",
+      "date_added": "2026-07-06", "trained_on": "human imitation, epoch 25 (checkpoint selected by best vs-SMART score during training -- old methodology, kept as the experiment's control group)",
+      "notes": "Control group in the 3-way selection-criterion experiment (see policy_all). Online avg_score -9.05 over 99 real games -- worse than vs-pool selection (policy_all)."
+    },
+    {
+      "name": "policy_all_minloss", "file": "checkpoints/saved/policy_all_minloss.pt",
+      "arch": "cardaware_history", "class": "CardAwareActorCriticHistory",
+      "source": "human-BC (ALL 1455-game corpus, same run as policy_all)",
+      "humanness": null, "humanness_basis": "unmeasured",
+      "date_added": "2026-07-06", "trained_on": "human imitation, epoch 55 (final epoch reached before patience-stop -- lowest training loss, not selected by any gameplay metric)",
+      "notes": "Control group in the 3-way selection-criterion experiment (see policy_all). Online avg_score -9.80 over 100 real games -- the WORST of the three despite having the lowest training loss (confirms training loss is not a reliable proxy for online strength)."
+    },
+    {
+      "name": "RL1", "file": "checkpoints/ppo_RL1_best.pt",
+      "arch": "cardaware_history", "class": "CardAwareActorCriticHistory",
+      "source": "human-BC warm-start (policy_all) -> self-play PPO league vs the opponent pool",
+      "humanness": null, "humanness_basis": "unmeasured",
+      "date_added": "2026-07-07", "trained_on": "200 PPO updates (games-per-batch 64, learner-seats 2, snapshot-every 20 -> pool grew 21->30), checkpoint selected by best vs-pool score (upd 190, pool avg_score +0.38)",
+      "notes": "First self-play RL iteration on top of the validated BC baseline. Local pool score barely moved vs policy_all's own (+0.38 vs +0.32). Online avg_score -7.53 over 100 real games, win_rate 6.0% (std 24) -- statistically indistinguishable from policy_all's -6.78 given the noise (SE ~2.4 at n=100). READ AS: 200 updates (~12.8k self-play games) wasn't enough training dosage to move the needle yet, not evidence the self-play approach failed -- the tiny local delta correctly predicted the tiny (noise-level) online delta, so the vs-pool local metric stayed well-calibrated here. Next iteration should scale up training (more updates and/or larger games-per-batch) before drawing conclusions about self-play's ceiling."
     }
   ],
   "not_pool_opponents": [
