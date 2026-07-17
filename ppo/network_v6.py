@@ -109,6 +109,39 @@ class CardAwareV6(nn.Module):
         logits, _, _ = self.forward(obs, af, am)
         return int(legal_idx[int(torch.argmax(logits[0]).item())])
 
+    @torch.no_grad()
+    def act(self, env, device):
+        """Stochastic sample -- needed so PPO_V6 can be used as a pool
+        opponent in ppo_trainer.py's collect() (opponents act stochastically
+        too, not just greedily). Mirrors CardAwareActorCritic.act; drops the
+        belief_logits output (not needed for action selection)."""
+        from ppo.network_cardaware import legal_action_data
+        legal_idx, feats = legal_action_data(env)
+        obs_np = obs_from_env(env)
+        obs = _to_batch([obs_np], device)
+        af = torch.from_numpy(feats).unsqueeze(0).to(device)
+        am = torch.ones(1, len(legal_idx), dtype=torch.bool, device=device)
+        logits, value, _ = self.forward(obs, af, am)
+        dist = torch.distributions.Categorical(logits=logits[0])
+        pos = dist.sample()
+        action = int(legal_idx[int(pos.item())])
+        rec = {"obs": obs_np, "feats": feats, "pos": int(pos.item())}
+        return action, float(dist.log_prob(pos).item()), float(value.item()), rec
+
+
+def evaluate_batch_v6(net, batch):
+    """PPO update pass for CardAwareV6 as a LEARNER (not just a frozen pool
+    opponent) -- reuses network_cardaware.build_batch's plain {obs,act_feats,
+    act_mask,pos} schema (no belief/bmask fields; those are only needed for
+    the separate BC+belief training loss in build_batch_v6/belief_loss below,
+    a different training mode from PPO). Discards belief_logits -- the PPO
+    objective here is plain policy+value, matching evaluate_batch in
+    network_cardaware.py/network_cardaware_history.py."""
+    logits, value, _ = net.forward(batch["obs"], batch["act_feats"], batch["act_mask"])
+    dist = torch.distributions.Categorical(logits=logits)
+    pos = batch["pos"]
+    return dist.log_prob(pos), dist.entropy(), value
+
 
 def build_batch_v6(records, device):
     """records: {obs, feats(L,AF), pos, belief(3,52), bmask(52)}."""
