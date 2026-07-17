@@ -56,6 +56,7 @@ def metrics(net, recs, ii, device):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", choices=["human", "winner", "all", "ours"], default="all")
+    ap.add_argument("--snapshot", default=None, help="json list of game ids to restrict training to")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -68,7 +69,7 @@ def main():
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     os.makedirs(CKPT_DIR, exist_ok=True)
 
-    recs = build_records(args.target)
+    recs = build_records(args.target, snapshot=args.snapshot)
     idx = np.arange(len(recs)); np.random.shuffle(idx)
     nval = int(len(recs) * args.val_frac)
     val_i, tr_i = idx[:nval], idx[nval:]

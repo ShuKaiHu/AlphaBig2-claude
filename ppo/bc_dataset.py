@@ -51,19 +51,35 @@ def _snapshot(acting, remaining, cardsPlayed, control, trick_cards, trick_owner,
     return g
 
 
-def build_records(target="human", verbose=True):
+def build_records(target="human", verbose=True, snapshot=None):
+    """snapshot: optional path to a json list of game ids -> restrict to those
+    games (nested data-size scaling experiments). None = full corpus."""
     games = [json.loads(l) for l in open(DATA)]
+    if snapshot:
+        from ppo.parse_online_games import game_id as _gid
+        ids = set(json.load(open(snapshot)))
+        games = [g for g in games if (g.get("id") or _gid(g)) in ids]
     records, n_dec, n_skip = [], 0, 0
     for g in games:
         hands = {int(s): list(map(int, g["hands"][s])) for s in g["hands"]}
         our = g["our_seat"]; winner = g["winner"]
         played = {s: [] for s in range(4)}
         cardsPlayed = np.zeros((4, 52), dtype=np.int64)
-        trick_cards, trick_owner, passed = None, None, set()
+        # passed = seats out for the current trick; consec = passes in a row.
+        # 神來也 re-prompts already-passed seats every rotation and the SERVER
+        # auto-passes them (median 4ms) -- those are not decisions. Match the
+        # engine (big2Game): a play clears only its own seat and does NOT reopen
+        # the trick; the trick resets only after 3 CONSECUTIVE passes (autos
+        # included). Treating each play as a full reset (the old code) both
+        # mis-set `control` and fed 15,866 server auto-passes into the human
+        # target -- 2,245 of them with a play-bearing mask, i.e. actively
+        # teaching "pass while holding a legal play".
+        trick_cards, trick_owner, passed, consec = None, None, set(), 0
         for ev in g["plays"]:
             s = ev["seat"]; act = ev["action"]; cards = list(map(int, ev["cards"]))
+            forced = act == "pass" and s in passed   # server auto-skip, not a decision
             control = 1 if trick_cards is None else 0
-            want = (target == "all" or (target == "human" and s != our)
+            want = (not forced) and (target == "all" or (target == "human" and s != our)
                     or (target == "winner" and s == winner)
                     or (target == "ours" and s == our))
             if want:
@@ -88,7 +104,61 @@ def build_records(target="human", verbose=True):
                                     "pos": pos,
                                     "belief": belief_target_from_env(shim),  # oracle, loss-only
                                     "bmask": unseen_mask_from_obs(obs)})
-            # apply event
+            # apply event (match engine: play keeps others' passed flags; only
+            # 3 passes IN A ROW -- autos counted -- end the trick)
+            if act == "play":
+                played[s].extend(cards)
+                for c in cards:
+                    cardsPlayed[s][c - 1] = 1
+                trick_cards, trick_owner = cards, s
+                passed.discard(s)
+                consec = 0
+            else:
+                passed.add(s)
+                consec += 1
+                if consec >= 3:
+                    trick_cards, trick_owner, passed, consec = None, None, set(), 0
+    if verbose:
+        print(f"target={target}: examples={len(records)}  "
+              f"(label-in-mask {100*len(records)/max(n_dec,1):.1f}% of {n_dec} target decisions; "
+              f"skipped {n_skip})")
+    return records
+
+
+def build_value_records(scale=13.0, verbose=True):
+    """Full-info VALUE training records from the human showdown games.
+
+    At EVERY decision in each game we know all four hands (showdown), so we
+    snapshot a full-info big2Game for the acting seat and store the V9 god-view
+    value inputs (encode_static + encode_opp_hands) paired with the game's FINAL
+    per-player score (Monte-Carlo target, tanh-normalized, ABSOLUTE player index
+    so it matches Big2ValueNet's 4-dim output). `game` is the game index for a
+    leak-free GAME-LEVEL train/val split (states in one game share a target)."""
+    from engine.features import encode_static, encode_opp_hands
+    games = [json.loads(l) for l in open(DATA)]
+    records, n_skip = [], 0
+    for gi, g in enumerate(games):
+        hands = {int(s): list(map(int, g["hands"][s])) for s in g["hands"]}
+        scores = {int(k): float(v) for k, v in g["scores"].items()}
+        tgt = np.array([np.tanh(scores.get(i, 0.0) / scale) for i in range(4)],
+                       dtype=np.float32)  # ABSOLUTE: target[i] = seat i (engine player i+1)
+        played = {s: [] for s in range(4)}
+        cardsPlayed = np.zeros((4, 52), dtype=np.int64)
+        trick_cards, trick_owner, passed = None, None, set()
+        for ev in g["plays"]:
+            s = ev["seat"]; act = ev["action"]; cards = list(map(int, ev["cards"]))
+            control = 1 if trick_cards is None else 0
+            remaining = {k: [c for c in hands[k] if c not in set(played[k])] for k in range(4)}
+            gg = _snapshot(s, remaining, cardsPlayed, control, trick_cards, trick_owner, passed)
+            try:
+                records.append({
+                    "static": encode_static(gg, s + 1).astype(np.float32),
+                    "opp": encode_opp_hands(gg, s + 1).astype(np.float32),
+                    "target": tgt,
+                    "game": gi,
+                })
+            except Exception:
+                n_skip += 1
             if act == "play":
                 played[s].extend(cards)
                 for c in cards:
@@ -99,12 +169,12 @@ def build_records(target="human", verbose=True):
                 if len(passed) >= 3:
                     trick_cards, trick_owner, passed = None, None, set()
     if verbose:
-        print(f"target={target}: examples={len(records)}  "
-              f"(label-in-mask {100*len(records)/max(n_dec,1):.1f}% of {n_dec} target decisions; "
-              f"skipped {n_skip})")
+        print(f"value records: {len(records)} states from {len(games)} games "
+              f"(skipped {n_skip})")
     return records
 
 
 if __name__ == "__main__":
     for t in ("human", "winner", "all"):
         build_records(t)
+    build_value_records()

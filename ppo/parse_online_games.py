@@ -63,23 +63,38 @@ def parse_run(path):
         nl = json.load(open(path))
     except Exception:
         return
-    # parsed_events gives us which seat is OUR agent (self_hand_snapshot)
-    our_seat = None
+    # Which seat is OUR agent, PER GAME. A run plays many games and re-seats at
+    # every new table, so the seat changes within a run -- taking one mode over the
+    # whole run (what this did before) was wrong for most games: measured against
+    # reward_log's authoritative self_score, the old per-run seat was right only
+    # 42.7% of the time. That fed bc_dataset(target="human"), which keeps the three
+    # seats that are NOT ours, so a wrong seat silently trained the "human" imitation
+    # target on our own agent's moves. self_hand_snapshot carries self_index, and
+    # both logs share the WS `seq`, so we slice snapshots by each game's seq range.
+    snaps = []          # [(seq, self_index)] ascending
     pe_path = os.path.join(os.path.dirname(path), "parsed_events.json")
     if os.path.exists(pe_path):
         try:
             pe = json.load(open(pe_path))
-            snaps = [int(e["actor_index"]) for e in pe
-                     if isinstance(e, dict) and e.get("event") == "self_hand_snapshot"
-                     and str(e.get("actor_index", "")).isdigit()]
-            if snaps:
-                our_seat = max(set(snaps), key=snaps.count)
+            for e in pe:
+                if not isinstance(e, dict) or e.get("event") != "self_hand_snapshot":
+                    continue
+                idx = e.get("self_index", e.get("actor_index"))
+                if str(idx).lstrip("-").isdigit() and str(e.get("seq", "")).isdigit():
+                    snaps.append((int(e["seq"]), int(idx)))
+            snaps.sort()
         except Exception:
-            pass
+            snaps = []
+
+    def seat_for(lo, hi):
+        """Our seat during the game spanning WS seq [lo, hi): the seat our own
+        hand snapshots reported. None if this game had no snapshot to go on."""
+        seen = [i for s, i in snaps if lo <= s < (hi if hi is not None else 1 << 62)]
+        return max(set(seen), key=seen.count) if seen else None
 
     cur = None  # {"plays": [...], "played": {seat:set}, "settle": {seat:(score,ids)}}
 
-    def finalize(g):
+    def finalize(g, hi=None):
         if not g or not g["settle"]:
             return None
         seats = [0, 1, 2, 3]
@@ -98,6 +113,10 @@ def parse_run(path):
         scores = {s: g["settle"][s][0] for s in seats if s in g["settle"]}
         if len(scores) != 4:
             return None
+        our_seat = seat_for(g["seq0"], hi)
+        if our_seat is None:
+            return None          # no snapshot -> seat unknown; a guess would poison
+                                 # the human-imitation target, so drop the game
         winner = max(scores, key=scores.get)
         return {"our_seat": our_seat, "hands": hands, "plays": g["plays"],
                 "scores": scores, "winner": winner}
@@ -113,10 +132,11 @@ def parse_run(path):
             continue
         cmd = t[0]
         if cmd == "gsstart":
-            g = finalize(cur)
+            seq = int(e["seq"]) if str(e.get("seq", "")).isdigit() else None
+            g = finalize(cur, hi=seq)     # this gsstart bounds the previous game
             if g:
                 yield g
-            cur = {"plays": [], "played": {}, "settle": {}}
+            cur = {"plays": [], "played": {}, "settle": {}, "seq0": seq or 0}
         elif cmd == "plsend" and cur is not None and len(t) >= 3:
             try:
                 seat = int(t[1]); ids = blob_ids(t[2])
@@ -137,7 +157,7 @@ def parse_run(path):
                 continue
             rem = blob_ids(t[3]) if len(t) > 3 and "," not in t[3] else []
             cur["settle"][seat] = (score, rem)
-    g = finalize(cur)
+    g = finalize(cur, hi=None)
     if g:
         yield g
 
