@@ -19,8 +19,11 @@ STRAIGHT_WINDOWS_RIDX = [frozenset(range(s, s + 5)) for s in range(0, 8)] \
                         + [frozenset({11, 12, 0, 1, 2}), frozenset({12, 0, 1, 2, 3})]
 assert len(STRAIGHT_WINDOWS_RIDX) == 10
 assert frozenset({8, 9, 10, 11, 12}) not in STRAIGHT_WINDOWS_RIDX      # J-Q-K-A-2 rejected
+assert frozenset({9, 10, 11, 12, 0}) not in STRAIGHT_WINDOWS_RIDX      # Q-K-A-2-3 rejected
+assert frozenset({10, 11, 12, 0, 1}) not in STRAIGHT_WINDOWS_RIDX      # K-A-2-3-4 rejected
 assert frozenset({7, 8, 9, 10, 11}) in STRAIGHT_WINDOWS_RIDX           # 10-J-Q-K-A ok
 assert frozenset({11, 12, 0, 1, 2}) in STRAIGHT_WINDOWS_RIDX           # A-2-3-4-5 ok
+assert frozenset({12, 0, 1, 2, 3}) in STRAIGHT_WINDOWS_RIDX            # 2-3-4-5-6 ok
 assert {tuple(sorted(w)) for w in STRAIGHT_WINDOWS_RIDX} == \
        {tuple(sorted(r - 1 for r in w)) for w in _WIN}                 # matches the card-id windows
 
