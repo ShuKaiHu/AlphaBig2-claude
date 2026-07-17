@@ -23,3 +23,6 @@ engine/checkpoints/*.pt
 *.summary
 *.meta
 *.worker.sh
+
+# per-version training checkpoint dirs (deploy copies live in engine/checkpoints/saved/)
+engine/checkpoints_v*/
