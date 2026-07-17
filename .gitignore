@@ -33,3 +33,6 @@ ppo/data/*
 !ppo/data/online_games.jsonl
 !ppo/data/run_versions.json
 !ppo/data/README.md
+
+# top-level scratch npz dumps (a2_* full-info value experiments)
+/data/
