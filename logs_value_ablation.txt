@@ -1,0 +1,15 @@
+value records: 200000 (1/game) from 200000 games, skipped 0
+computing dominance + min-plays features ...
+train 180000 / val 20000 | device mps
+=== ablation ===
+  [abl_plain] best val MSE 0.1361 (base 0.2561) | r +0.686 | sign 75.3%
+  [abl_dom] best val MSE 0.1337 (base 0.2561) | r +0.692 | sign 77.7%
+  [abl_minplays] best val MSE 0.1246 (base 0.2561) | r +0.717 | sign 79.8%
+  [abl_both] best val MSE 0.1244 (base 0.2561) | r +0.718 | sign 79.3%
+
+=== ablation summary (val) ===
+  variant         MSE    dMSE%        r
+  plain        0.1361     +0.0   +0.686
+  dom          0.1337     +1.8   +0.692
+  minplays     0.1246     +8.5   +0.717
+  both         0.1244     +8.6   +0.718

@@ -1,0 +1,48 @@
+  bomb decision 1/30 (n_legal=19)
+  bomb decision 2/30 (n_legal=19)
+  bomb decision 3/30 (n_legal=2)
+  bomb decision 4/30 (n_legal=20)
+  bomb decision 5/30 (n_legal=17)
+  bomb decision 6/30 (n_legal=10)
+  bomb decision 7/30 (n_legal=22)
+  bomb decision 8/30 (n_legal=19)
+  bomb decision 9/30 (n_legal=14)
+  bomb decision 10/30 (n_legal=11)
+  bomb decision 11/30 (n_legal=5)
+  bomb decision 12/30 (n_legal=5)
+  bomb decision 13/30 (n_legal=11)
+  bomb decision 14/30 (n_legal=8)
+  bomb decision 15/30 (n_legal=16)
+  bomb decision 16/30 (n_legal=18)
+  bomb decision 17/30 (n_legal=8)
+  bomb decision 18/30 (n_legal=23)
+  bomb decision 19/30 (n_legal=19)
+  bomb decision 20/30 (n_legal=17)
+  bomb decision 21/30 (n_legal=18)
+  bomb decision 22/30 (n_legal=2)
+  bomb decision 23/30 (n_legal=10)
+  bomb decision 24/30 (n_legal=2)
+  bomb decision 25/30 (n_legal=10)
+  bomb decision 26/30 (n_legal=15)
+  bomb decision 27/30 (n_legal=13)
+  bomb decision 28/30 (n_legal=7)
+  bomb decision 29/30 (n_legal=18)
+  bomb decision 30/30 (n_legal=2)
+
+(6110s)
+=== bomb timing diagnostic (n=30 decisions, k=30 worlds) ===
+  A_correctly_bombed    : 8/30 = 26.7%
+  B_missed_opportunity  : 5/30 = 16.7%
+  C_correctly_held      : 14/30 = 46.7%
+  D_unnecessary_bomb    : 3/30 = 10.0%
+
+  rollout says bomb IS optimal : 13/30 = 43.3%
+  policy actually played bomb  : 11/30 = 36.7%
+
+--- missed opportunities (bomb was best, policy held) ---
+  n_legal=19 gap=+0.233 roll_avg={4220: 0.75, 4222: 0.752, 4223: 0.822, 4508: 0.948, 5507: 0.941, 8619: 0.968, 11251: 0.984, 11526: 0.659, 11528: 0.572, 11533: 0.733, 11535: 0.675, 11537: 0.609, 11557: 0.305, 11572: 0.067, 11653: 0.353, 11668: 0.068, 11999: 0.35, 12014: 0.078, 14738: 0.775}
+  n_legal=2 gap=+0.218 roll_avg={0: 0.693, 1313: 0.911}
+  n_legal=17 gap=+0.438 roll_avg={32: 0.345, 33: 0.375, 34: 0.364, 35: 0.385, 36: 0.697, 38: 0.721, 44: 0.649, 46: 0.64, 49: 0.583, 5509: 0.783, 9533: 0.723, 14178: 0.639, 14180: 0.603, 14186: 0.597, 14188: 0.539, 14191: 0.602, 14738: 0.333}
+  n_legal=10 gap=+0.081 roll_avg={3873: -0.008, 6831: 0.173, 8059: 0.086, 10959: -0.129, 11979: -0.177, 12325: -0.172, 14177: -0.099, 14569: -0.122, 14681: -0.186, 14738: 0.092}
+  n_legal=7 gap=+0.421 roll_avg={0: -0.191, 53: -0.49, 539: 0.468, 544: 0.038, 547: 0.046, 552: 0.06, 572: -0.251}
+EXIT 0

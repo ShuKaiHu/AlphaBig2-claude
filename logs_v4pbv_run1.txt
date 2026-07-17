@@ -1,0 +1,127 @@
+V4PBV iteration | leaf=rollout root_noise=False min_visits=0 belief=frozen | sims=60 cpuct=1.5 bc_mix=0.25 | 5 iters x 200 games
+
+=== V4PBV_Iter0 ===
+    self-play 10/200 (10.6s/game, 287 pi-targets)
+    self-play 20/200 (9.4s/game, 519 pi-targets)
+    self-play 30/200 (8.9s/game, 724 pi-targets)
+    self-play 40/200 (8.8s/game, 950 pi-targets)
+    self-play 50/200 (8.7s/game, 1188 pi-targets)
+    self-play 60/200 (8.8s/game, 1443 pi-targets)
+    self-play 70/200 (9.0s/game, 1702 pi-targets)
+    self-play 80/200 (8.9s/game, 1922 pi-targets)
+    self-play 90/200 (9.0s/game, 2167 pi-targets)
+    self-play 100/200 (9.2s/game, 2458 pi-targets)
+    self-play 110/200 (9.1s/game, 2701 pi-targets)
+    self-play 120/200 (9.2s/game, 2957 pi-targets)
+    self-play 130/200 (9.3s/game, 3221 pi-targets)
+    self-play 140/200 (9.3s/game, 3445 pi-targets)
+    self-play 150/200 (9.2s/game, 3684 pi-targets)
+    self-play 160/200 (9.2s/game, 3923 pi-targets)
+    self-play 170/200 (9.2s/game, 4165 pi-targets)
+    self-play 180/200 (9.2s/game, 4406 pi-targets)
+    self-play 190/200 (9.3s/game, 4698 pi-targets)
+    self-play 200/200 (9.2s/game, 4935 pi-targets)
+    self-play done: +200 -> 200 games total in v4pbv_selfplay.jsonl
+    train_policy: 4935 self-play + 1645 human-BC = 6580 targets
+  V4PBV_Iter0: value val_mse 0.1017 (base 0.3078, 200 recs) | vs-V4 margin +3.87/game (40 games) | search-vs-rollout agree 50% clear-miss 25% (20 decisions) | pi-buffer 4935 targets
+
+=== V4PBV_Iter1 ===
+    self-play 10/200 (9.0s/game, 246 pi-targets)
+    self-play 20/200 (9.9s/game, 513 pi-targets)
+    self-play 30/200 (10.7s/game, 812 pi-targets)
+    self-play 40/200 (10.8s/game, 1091 pi-targets)
+    self-play 50/200 (10.9s/game, 1378 pi-targets)
+    self-play 60/200 (11.0s/game, 1651 pi-targets)
+    self-play 70/200 (10.8s/game, 1905 pi-targets)
+    self-play 80/200 (10.6s/game, 2147 pi-targets)
+    self-play 90/200 (10.4s/game, 2393 pi-targets)
+    self-play 100/200 (10.3s/game, 2646 pi-targets)
+    self-play 110/200 (10.3s/game, 2903 pi-targets)
+    self-play 120/200 (10.4s/game, 3162 pi-targets)
+    self-play 130/200 (10.4s/game, 3437 pi-targets)
+    self-play 140/200 (10.4s/game, 3711 pi-targets)
+    self-play 150/200 (10.4s/game, 3989 pi-targets)
+    self-play 160/200 (10.4s/game, 4255 pi-targets)
+    self-play 170/200 (10.4s/game, 4508 pi-targets)
+    self-play 180/200 (10.4s/game, 4786 pi-targets)
+    self-play 190/200 (10.5s/game, 5082 pi-targets)
+    self-play 200/200 (10.4s/game, 5354 pi-targets)
+    self-play done: +200 -> 400 games total in v4pbv_selfplay.jsonl
+    train_policy: 10289 self-play + 3429 human-BC = 13718 targets
+  V4PBV_Iter1: value val_mse 0.1134 (base 0.2969, 400 recs) | vs-V4 margin +1.73/game (40 games) | search-vs-rollout agree 50% clear-miss 20% (20 decisions) | pi-buffer 10289 targets
+
+=== V4PBV_Iter2 ===
+    self-play 10/200 (11.1s/game, 279 pi-targets)
+    self-play 20/200 (11.4s/game, 565 pi-targets)
+    self-play 30/200 (10.4s/game, 802 pi-targets)
+    self-play 40/200 (10.6s/game, 1060 pi-targets)
+    self-play 50/200 (10.3s/game, 1301 pi-targets)
+    self-play 60/200 (10.2s/game, 1572 pi-targets)
+    self-play 70/200 (10.2s/game, 1822 pi-targets)
+    self-play 80/200 (10.3s/game, 2098 pi-targets)
+    self-play 90/200 (10.4s/game, 2377 pi-targets)
+    self-play 100/200 (10.4s/game, 2660 pi-targets)
+    self-play 110/200 (10.2s/game, 2879 pi-targets)
+    self-play 120/200 (10.1s/game, 3110 pi-targets)
+    self-play 130/200 (10.1s/game, 3389 pi-targets)
+    self-play 140/200 (10.1s/game, 3636 pi-targets)
+    self-play 150/200 (10.1s/game, 3920 pi-targets)
+    self-play 160/200 (10.1s/game, 4182 pi-targets)
+    self-play 170/200 (10.0s/game, 4453 pi-targets)
+    self-play 180/200 (10.1s/game, 4717 pi-targets)
+    self-play 190/200 (10.1s/game, 4979 pi-targets)
+    self-play 200/200 (10.1s/game, 5278 pi-targets)
+    self-play done: +200 -> 600 games total in v4pbv_selfplay.jsonl
+    train_policy: 15567 self-play + 5189 human-BC = 20756 targets
+  V4PBV_Iter2: value val_mse 0.1227 (base 0.2628, 600 recs) | vs-V4 margin +3.83/game (40 games) | search-vs-rollout agree 55% clear-miss 30% (20 decisions) | pi-buffer 15567 targets
+
+=== V4PBV_Iter3 ===
+    self-play 10/200 (9.7s/game, 257 pi-targets)
+    self-play 20/200 (10.8s/game, 555 pi-targets)
+    self-play 30/200 (11.3s/game, 867 pi-targets)
+    self-play 40/200 (10.6s/game, 1099 pi-targets)
+    self-play 50/200 (10.4s/game, 1345 pi-targets)
+    self-play 60/200 (10.3s/game, 1595 pi-targets)
+    self-play 70/200 (10.7s/game, 1894 pi-targets)
+    self-play 80/200 (10.8s/game, 2176 pi-targets)
+    self-play 90/200 (10.9s/game, 2462 pi-targets)
+    self-play 100/200 (10.9s/game, 2731 pi-targets)
+    self-play 110/200 (11.0s/game, 3031 pi-targets)
+    self-play 120/200 (11.0s/game, 3285 pi-targets)
+    self-play 130/200 (11.1s/game, 3580 pi-targets)
+    self-play 140/200 (11.0s/game, 3826 pi-targets)
+    self-play 150/200 (11.0s/game, 4094 pi-targets)
+    self-play 160/200 (10.9s/game, 4340 pi-targets)
+    self-play 170/200 (10.8s/game, 4576 pi-targets)
+    self-play 180/200 (10.8s/game, 4839 pi-targets)
+    self-play 190/200 (10.7s/game, 5078 pi-targets)
+    self-play 200/200 (10.7s/game, 5360 pi-targets)
+    self-play done: +200 -> 800 games total in v4pbv_selfplay.jsonl
+    train_policy: 20927 self-play + 6975 human-BC = 27902 targets
+  V4PBV_Iter3: value val_mse 0.0920 (base 0.2677, 800 recs) | vs-V4 margin +8.07/game (40 games) | search-vs-rollout agree 40% clear-miss 5% (20 decisions) | pi-buffer 20927 targets
+
+=== V4PBV_Iter4 ===
+    self-play 10/200 (11.2s/game, 305 pi-targets)
+    self-play 20/200 (11.2s/game, 582 pi-targets)
+    self-play 30/200 (11.1s/game, 867 pi-targets)
+    self-play 40/200 (11.4s/game, 1165 pi-targets)
+    self-play 50/200 (11.1s/game, 1418 pi-targets)
+    self-play 60/200 (11.2s/game, 1702 pi-targets)
+    self-play 70/200 (11.0s/game, 1958 pi-targets)
+    self-play 80/200 (11.0s/game, 2246 pi-targets)
+    self-play 90/200 (10.8s/game, 2475 pi-targets)
+    self-play 100/200 (10.8s/game, 2735 pi-targets)
+    self-play 110/200 (10.9s/game, 3035 pi-targets)
+    self-play 120/200 (11.0s/game, 3315 pi-targets)
+    self-play 130/200 (11.0s/game, 3593 pi-targets)
+    self-play 140/200 (11.1s/game, 3880 pi-targets)
+    self-play 150/200 (11.2s/game, 4198 pi-targets)
+    self-play 160/200 (11.1s/game, 4446 pi-targets)
+    self-play 170/200 (11.1s/game, 4732 pi-targets)
+    self-play 180/200 (11.2s/game, 5032 pi-targets)
+    self-play 190/200 (11.1s/game, 5288 pi-targets)
+    self-play 200/200 (11.2s/game, 5612 pi-targets)
+    self-play done: +200 -> 1000 games total in v4pbv_selfplay.jsonl
+    train_policy: 26539 self-play + 8846 human-BC = 35385 targets
+  V4PBV_Iter4: value val_mse 0.0720 (base 0.3033, 1000 recs) | vs-V4 margin +0.37/game (40 games) | search-vs-rollout agree 60% clear-miss 20% (20 decisions) | pi-buffer 26539 targets
+EXIT 0
