@@ -47,8 +47,32 @@ class big2Game:
                 setattr(new, key, copy.deepcopy(value))
         return new
         
-    def reset(self):
-        shuffledDeck = np.random.permutation(52) + 1
+    def reset(self, hands=None, starter=None, must_play_club3=None):
+        """Deal a new game.
+
+        ADDITIVE state-injection support (M3, 2026-07). With NO arguments this
+        is byte-identical to the original reset() -- same RNG consumption, same
+        deal, same flags (verified by seeded-deal + full-game regression; the
+        live online campaign re-imports this file and must see zero change).
+
+        hands: FULL-DEAL injection. Either a list/tuple of 4 card-id lists
+            (index 0 -> player 1) or a dict keyed {1,2,3,4} (engine players)
+            or {0,1,2,3} (0-based seats, mapped seat+1). Must be an exact
+            partition of card ids 1..52 into 4 hands of 13 -- raises
+            ValueError otherwise. The club3Player / mustPlayClub3 logic then
+            runs on the injected deal exactly as on a random one.
+        starter: override which player (1-4) acts first. Default None keeps
+            the club-3 holder. If you set starter to a different player while
+            mustPlayClub3 stays True, the 3C holder will still be forced when
+            they later gain control -- pass must_play_club3=False for
+            mid-game-like openings.
+        must_play_club3: override the forced-3C-opening flag (bool). Default
+            None = current logic (True, forced on the 3C holder).
+        """
+        if hands is None:
+            shuffledDeck = np.random.permutation(52) + 1
+        else:
+            shuffledDeck = self._validated_full_deal(hands)
         #hand out cards to each player
         self.currentHands = {}
         self.currentHands[1] = np.sort(shuffledDeck[0:13])
@@ -99,7 +123,220 @@ class big2Game:
         self.gameOver = 0
         self.rewards = np.zeros((4,))
         self.goCounter = 0
-        
+        # -- injection overrides (no-ops when reset() is called with no args) --
+        if starter is not None:
+            if starter not in (1, 2, 3, 4):
+                raise ValueError(f"starter must be 1-4, got {starter!r}")
+            self.playersGo = starter
+            self.lastPlayedPlayer = starter
+        if must_play_club3 is not None:
+            self.mustPlayClub3 = bool(must_play_club3)
+
+    @staticmethod
+    def _normalize_hands_arg(hands):
+        """Accept list/tuple of 4 hands (index 0 -> player 1) or dict keyed
+        {1,2,3,4} or {0,1,2,3}; return {player(1-4): [int card ids]}."""
+        if isinstance(hands, dict):
+            keys = set(hands.keys())
+            if keys == {1, 2, 3, 4}:
+                out = {p: hands[p] for p in range(1, 5)}
+            elif keys == {0, 1, 2, 3}:
+                out = {s + 1: hands[s] for s in range(4)}
+            else:
+                raise ValueError(
+                    f"hands dict must be keyed 1-4 or 0-3, got keys {sorted(keys)!r}")
+        elif isinstance(hands, (list, tuple)) and len(hands) == 4:
+            out = {i + 1: hands[i] for i in range(4)}
+        else:
+            raise ValueError("hands must be a dict of 4 hands or a list/tuple of 4 hands")
+        norm = {}
+        for p in range(1, 5):
+            cards = [int(c) for c in out[p]]
+            for c in cards:
+                if not 1 <= c <= 52:
+                    raise ValueError(f"player {p}: card id {c} outside 1..52")
+            if len(set(cards)) != len(cards):
+                raise ValueError(f"player {p}: duplicate card ids in hand {cards}")
+            norm[p] = cards
+        return norm
+
+    @classmethod
+    def _validated_full_deal(cls, hands):
+        """Validate a FULL-DEAL injection and return it as a 52-card deck array
+        laid out so reset()'s existing slicing reproduces the hands exactly."""
+        norm = cls._normalize_hands_arg(hands)
+        for p in range(1, 5):
+            if len(norm[p]) != 13:
+                raise ValueError(
+                    f"full-deal injection: player {p} has {len(norm[p])} cards, need 13")
+        allc = norm[1] + norm[2] + norm[3] + norm[4]
+        if set(allc) != set(range(1, 53)):
+            missing = sorted(set(range(1, 53)) - set(allc))
+            dupes = sorted({c for c in allc if allc.count(c) > 1})
+            raise ValueError(
+                f"full-deal injection must partition card ids 1..52 across 4x13 "
+                f"(missing={missing}, duplicated={dupes})")
+        return np.array(allc, dtype=np.int64)
+
+    @classmethod
+    def restore_state(cls, hands, whose_turn, trick_cards=None, trick_owner=None,
+                      passed_players=(), cards_played=None, must_play_club3=False):
+        """MID-GAME state injection: reconstruct a fully playable big2Game.
+
+        Modeled on ppo/bc_dataset._snapshot (the BC replay snapshot) but returns
+        a game that can be PLAYED to completion: updateGame / step /
+        returnAvailableActions / assignRewards (platform-exact scoring) all work.
+        Built via __new__, so it consumes NO numpy RNG.
+
+        hands: REMAINING cards per player -- same formats as reset(hands=...)
+            (list of 4 lists, or dict keyed 1-4 / 0-3), each hand non-empty.
+        whose_turn: player 1-4 to act.
+        trick_cards: cards of the hand currently to beat (None = whose_turn has
+            control / free lead).
+        trick_owner: player 1-4 who played trick_cards (required with
+            trick_cards).
+        passed_players: players who have already passed this trick (same
+            1-4 / 0-3 key convention as hands: ints 1-4 are engine players).
+        cards_played: per-player cards ALREADY PLAYED this game -- either a
+            (4,52) 0/1 mask (row s = player s+1) or the same dict/list-of-4
+            format as hands. None = nothing played yet.
+        must_play_club3: forced-3C flag for the restored state (default False:
+            an injected mid-game state must NOT force the 3C opening).
+
+        Validation (raises ValueError): remaining + played must exactly
+        partition card ids 1..52 with no duplicates (card conservation);
+        trick_cards must be among trick_owner's played cards; the actor and
+        trick owner cannot be in passed_players; at most 2 passed players while
+        a trick is live (3 consecutive passes would have reset the trick).
+
+        The legacy 412-dim neuralNetworkInputs are reconstructed exactly for:
+        own-hand features, opponent card counts, played big-card memory
+        (both per-opponent 2s block and the global >=J record) and the current
+        trick. Pass-history bits are replayed in turn order after trick_owner,
+        which is exact when all live passes happened after the current trick
+        play (the common case) and an approximation otherwise. The cardaware /
+        v6 observation paths (obs_from_env) do not read these bits at all.
+        actionHistory starts empty (history before the injection point is not
+        representable). Engine DYNAMICS and SCORING are exact.
+        """
+        norm = cls._normalize_hands_arg(hands)
+        for p in range(1, 5):
+            if len(norm[p]) == 0:
+                raise ValueError(f"player {p} has an empty hand -- game would be over")
+        if whose_turn not in (1, 2, 3, 4):
+            raise ValueError(f"whose_turn must be 1-4, got {whose_turn!r}")
+        # played-cards mask
+        played_mask = np.zeros((4, 52), dtype=int)
+        if cards_played is not None:
+            if isinstance(cards_played, np.ndarray):
+                if cards_played.shape != (4, 52):
+                    raise ValueError(
+                        f"cards_played ndarray must be (4,52), got {cards_played.shape}")
+                played_mask = (cards_played != 0).astype(int)
+            else:
+                pl = cls._normalize_hands_arg(cards_played)
+                for p in range(1, 5):
+                    for c in pl[p]:
+                        played_mask[p - 1][c - 1] = 1
+        # card conservation: remaining + played partition 1..52 exactly
+        remaining_all = [c for p in range(1, 5) for c in norm[p]]
+        played_all = [int(c) + 1 for c in np.flatnonzero(played_mask.sum(axis=0))]
+        overlap = set(remaining_all) & set(played_all)
+        if overlap:
+            raise ValueError(f"cards both in a hand and played: {sorted(overlap)}")
+        if int(played_mask.sum()) != len(played_all):
+            dup = [int(c) + 1 for c in np.flatnonzero(played_mask.sum(axis=0) > 1)]
+            raise ValueError(f"cards played by more than one player: {dup}")
+        union = set(remaining_all) | set(played_all)
+        if union != set(range(1, 53)) or len(remaining_all) + len(played_all) != 52:
+            missing = sorted(set(range(1, 53)) - union)
+            raise ValueError(
+                f"card conservation violated: remaining({len(remaining_all)}) + "
+                f"played({len(played_all)}) != 52 distinct (missing={missing})")
+        # trick / pass validation
+        passed = set()
+        for q in passed_players:
+            q = int(q)
+            if q not in (1, 2, 3, 4):
+                raise ValueError(f"passed player {q!r} not in 1-4")
+            passed.add(q)
+        if trick_cards is not None:
+            if trick_owner not in (1, 2, 3, 4):
+                raise ValueError("trick_owner (1-4) is required with trick_cards")
+            tc = sorted(int(c) for c in trick_cards)
+            for c in tc:
+                if not played_mask[trick_owner - 1][c - 1]:
+                    raise ValueError(
+                        f"trick card {c} is not among player {trick_owner}'s played cards")
+            if trick_owner == whose_turn:
+                raise ValueError("trick_owner cannot be the actor while the trick is live")
+            if trick_owner in passed:
+                raise ValueError("trick_owner cannot have passed on its own live trick")
+            if whose_turn in passed:
+                raise ValueError("whose_turn has already passed -- it cannot be their go")
+            if len(passed) > 2:
+                raise ValueError(
+                    "at most 2 players can have passed while a trick is live "
+                    "(3 consecutive passes reset the trick)")
+        else:
+            if passed:
+                raise ValueError("passed_players must be empty on a free lead (no trick)")
+            tc = None
+
+        g = cls.__new__(cls)
+        g.currentHands = {p: np.sort(np.array(norm[p], dtype=np.int64))
+                          for p in range(1, 5)}
+        g.cardsPlayed = played_mask
+        g.playersGo = whose_turn
+        g.passedThisRound = {p: (p in passed) for p in range(1, 5)}
+        g.passCount = len(passed)
+        g.mustPlayClub3 = bool(must_play_club3)
+        g.club3Player = whose_turn
+        g.actionHistory = []
+        g.gameOver = 0
+        g.rewards = np.zeros((4,))
+        g.goCounter = 0
+        if tc is not None:
+            g.control = 0
+            g.goIndex = 2
+            g.handsPlayed = {1: handPlayed(np.array(tc, dtype=np.int64), trick_owner)}
+            g.lastPlayedPlayer = trick_owner
+        else:
+            g.control = 1
+            g.goIndex = 1
+            g.handsPlayed = {}
+            g.lastPlayedPlayer = whose_turn
+        # -- reconstruct the legacy 412-dim network inputs --
+        g.neuralNetworkInputs = {p: np.zeros((412,), dtype=int) for p in range(1, 5)}
+        for p in range(1, 5):
+            g.fillNeuralNetworkHand(p)
+        nPlayerInd = 22 * 13
+        endInd = nPlayerInd + 27 + 27 + 27
+        for p in range(1, 5):
+            for k in (1, 2, 3):   # p's count lives in viewer (p-k)'s k-th block
+                viewer = p - k if p - k >= 1 else p - k + 4
+                blockInd = nPlayerInd + (k - 1) * 27
+                g.neuralNetworkInputs[viewer][blockInd + g.currentHands[p].size - 1] = 1
+                for c in range(45, 53):   # big cards (A/2) p has already played
+                    if played_mask[p - 1][c - 1]:
+                        g.neuralNetworkInputs[viewer][blockInd + 13 + (c - 45)] = 1
+        for c in range(37, 53):           # global >=J played record (all viewers)
+            if played_mask[:, c - 1].any():
+                for p in range(1, 5):
+                    g.neuralNetworkInputs[p][endInd + (c - 37)] = 1
+        if tc is not None:
+            g.updateNeuralNetworkInputs(np.array(tc, dtype=np.int64), trick_owner)
+            if passed:                    # replay live passes in turn order
+                g.passCount = 0
+                q = trick_owner
+                for _ in range(3):
+                    q = q + 1 if q < 4 else 1
+                    if q in passed:
+                        g.updateNeuralNetworkPass(q)
+                        g.passCount += 1
+                g.passCount = len(passed)
+        return g
+
     def fillNeuralNetworkHand(self,player):
         handOptions = gameLogic.handsAvailable(self.currentHands[player])
         sInd = 0

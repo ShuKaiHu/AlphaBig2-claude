@@ -22,6 +22,8 @@ Run from the worktree root:
 import argparse
 import math
 import os
+import subprocess
+import sys
 import time
 
 import numpy as np
@@ -34,6 +36,11 @@ from ppo.eval_baselines import evaluate_vs_all
 from ppo.pool_eval import evaluate_vs_pool, evaluate_vs_each, load_pool
 
 CKPT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# first few luck-baseline subtractions are printed for eyeball verification
+_LUCK_DEBUG = {"left": 0}
 
 
 def compute_gae(rewards, values, dones, gamma, lam):
@@ -47,17 +54,31 @@ def compute_gae(rewards, values, dones, gamma, lam):
     return adv, adv + np.asarray(values, dtype=np.float32)
 
 
-def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_seats=4):
+def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_seats=4,
+            luck_fn=None):
     """Play n_games and gather the LEARNER's transitions.
 
     pool empty/None  -> pure current-policy self-play (all 4 seats = learner).
     pool non-empty   -> league: `learner_seats` random seats use the current
       policy (collected & trained on); the other seats are each controlled by a
-      frozen opponent sampled from `pool` (sampled actions, NOT collected)."""
+      frozen opponent sampled from `pool` (sampled actions, NOT collected).
+
+    luck_fn (default None = exact legacy behavior): maps the learner seat's
+      DEALT 13-card hand -> E[score | dealt hand]; subtracted from the terminal
+      reward (deal-luck baseline, M3 Track C). Fit on 13-card STARTING hands
+      only — for injected mid-game episode starts it must be skipped
+      (luck_fn returns 0.0 for a non-13-card hand; see _make_luck_fn)."""
     records, logp_old, adv_all, ret_all = [], [], [], []
 
     for _ in range(n_games):
         env.reset()
+        # TODO(M3 Phase 1 — INJECTED EPISODE STARTS): 30-50% of episodes should
+        # start from injected real-human game states (Track A state pools;
+        # D2 "caged loss holding a 2" occurs in only ~1.2% of natural self-play
+        # seat-games) instead of env.reset(). When wiring that in: an injected
+        # episode starts MID-GAME, so the dealt hand is NOT a 13-card starting
+        # hand and the luck baseline below MUST be 0 for that episode
+        # (luck_fn already returns 0.0 for len != 13 — keep that invariant).
         if pool:
             lseats = set(int(s) for s in np.random.choice(
                 [1, 2, 3, 4], size=learner_seats, replace=False))
@@ -66,6 +87,9 @@ def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_s
         else:
             lseats, opp = {1, 2, 3, 4}, {}
         seat = {p: {"rec": [], "logp": [], "val": []} for p in lseats}
+        if luck_fn is not None:
+            # capture dealt hands NOW — currentHands mutates as plays occur
+            dealt = {p: [int(c) for c in env.game.currentHands[p]] for p in lseats}
         rewards = None
         while not env.done:
             p = env.current_player
@@ -83,7 +107,17 @@ def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_s
             if steps == 0:
                 continue
             r = np.zeros(steps, dtype=np.float32)
-            r[-1] = float(rewards[sp - 1]) / reward_scale
+            if luck_fn is None:
+                r[-1] = float(rewards[sp - 1]) / reward_scale
+            else:
+                raw = float(rewards[sp - 1])
+                base = luck_fn(dealt[sp])
+                r[-1] = (raw - base) / reward_scale
+                if _LUCK_DEBUG["left"] > 0:
+                    _LUCK_DEBUG["left"] -= 1
+                    print(f"   [luck-baseline] seat {sp}: raw {raw:+.1f} - "
+                          f"baseline {base:+.2f} -> shaped {raw - base:+.2f} "
+                          f"(scaled {r[-1]:+.4f})")
             d = np.zeros(steps, dtype=bool)
             d[-1] = True
             adv, ret = compute_gae(r, seat[sp]["val"], d, gamma, lam)
@@ -116,14 +150,23 @@ def _snapshot(policy, arch, device):
 
 
 def ppo_update(policy, opt, records, logp_old, adv, ret, device,
-               epochs, minibatch, clip, vf_coef, ent_coef, max_grad):
+               epochs, minibatch, clip, vf_coef, ent_coef, max_grad,
+               kl_ref=None, kl_beta=0.0):
+    """kl_ref/kl_beta (defaults = exact legacy behavior): anchored RL (M3
+    Track C). Adds beta * KL(pi || pi_ref) per decision to the loss, with
+    pi_ref a FROZEN reference policy evaluated on the same minibatch. Uses the
+    k3 estimator  E_a~mu[ exp(dr) - 1 - dr ],  dr = logp_ref - logp:
+    non-negative, exactly 0 when pi == pi_ref, and the gradient flows through
+    logp. TODO(M3 Phase 2): adaptive beta (target-KL controller) — fixed beta
+    is enough for Phase 1."""
+    use_klref = (kl_ref is not None) and (kl_beta > 0.0)
     n = len(records)
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
     logp_old_t = torch.from_numpy(logp_old).to(device)
     adv_t = torch.from_numpy(adv).to(device)
     ret_t = torch.from_numpy(ret).to(device)
     idx = np.arange(n)
-    acc = {"pi": 0.0, "v": 0.0, "ent": 0.0, "kl": 0.0, "nb": 0}
+    acc = {"pi": 0.0, "v": 0.0, "ent": 0.0, "kl": 0.0, "klref": 0.0, "nb": 0}
     for _ in range(epochs):
         np.random.shuffle(idx)
         for s in range(0, n, minibatch):
@@ -137,6 +180,12 @@ def ppo_update(policy, opt, records, logp_old, adv, ret, device,
             v_loss = nn.functional.mse_loss(value, ret_t[mb_t])
             ent = entropy.mean()
             loss = pi_loss + vf_coef * v_loss - ent_coef * ent
+            if use_klref:
+                with torch.no_grad():
+                    logp_ref, _, _ = kl_ref.evaluate(batch)
+                dr = logp_ref - logp                       # grad flows via logp
+                kl_ref_term = (torch.exp(dr) - 1.0 - dr).mean()
+                loss = loss + kl_beta * kl_ref_term
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(policy.parameters(), max_grad)
@@ -146,9 +195,11 @@ def ppo_update(policy, opt, records, logp_old, adv, ret, device,
                 acc["v"] += v_loss.item()
                 acc["ent"] += ent.item()
                 acc["kl"] += (logp_old_t[mb_t] - logp).mean().item()
+                if use_klref:
+                    acc["klref"] += kl_ref_term.item()
                 acc["nb"] += 1
     nb = max(acc["nb"], 1)
-    return {k: acc[k] / nb for k in ("pi", "v", "ent", "kl")}, n
+    return {k: acc[k] / nb for k in ("pi", "v", "ent", "kl", "klref")}, n
 
 
 def lr_at(update, total, base_lr, warmup):
@@ -193,6 +244,80 @@ def run_eval_per_member(policy, eval_pool, n_games, device):
     return res, min_score
 
 
+def _fit_luck_baseline(path):
+    """Fit E[score | dealt hand] on a SNAPSHOT of the online human games
+    (M3 Track C --luck-baseline). Reuses ppo/aw_weights.py's fit (mp / n_twos /
+    bomb binned means + ridge fallback) verbatim. The live file may be appended
+    to by a harvest job mid-read, so we copy it first and tolerate a torn last
+    line."""
+    import shutil
+    import tempfile
+
+    from ppo.aw_weights import fit_baseline, human_seat_rows
+
+    fd, snap = tempfile.mkstemp(suffix=".jsonl", prefix="online_games_snap_")
+    os.close(fd)
+    try:
+        shutil.copyfile(path, snap)
+        import json
+        games, bad = [], 0
+        with open(snap) as f:
+            for ln in f:
+                try:
+                    games.append(json.loads(ln))
+                except json.JSONDecodeError:
+                    bad += 1                       # torn tail line from harvest
+    finally:
+        os.unlink(snap)
+    rows = human_seat_rows(games)
+    base = fit_baseline(rows)
+    print(f"[luck-baseline] fit on {len(games)} games ({len(rows)} human-seat rows, "
+          f"{bad} torn lines skipped) | r2={base.r2:.3f} mean_score={base.mean_score:+.2f}")
+    return base
+
+
+def _make_luck_fn(base):
+    """baseline(dealt hand) -> expected score from deal luck alone.
+
+    IMPORTANT (M3 Phase 1 injection): the baseline is fit on 13-card STARTING
+    hands only. For injected MID-GAME episode starts the hand is not a fresh
+    13-card deal — out of distribution — so the baseline is SKIPPED (0.0).
+    collect() relies on this invariant."""
+    from ppo.aw_weights import has_bomb, min_plays_to_empty, n_twos
+
+    def luck_fn(hand):
+        if hand is None or len(hand) != 13:
+            return 0.0                             # injected mid-game start
+        return float(base.predict(min_plays_to_empty(hand), n_twos(hand),
+                                  int(has_bomb(hand))))
+    return luck_fn
+
+
+def launch_gate_kpi(policy, args, update):
+    """Save a temp checkpoint and launch the FROZEN gate yardstick
+    (eval_policy_gates.py, via ppo/gate_kpi_wrapper.py) on it as a DETACHED
+    subprocess — the training loop never blocks on it, and never crashes
+    because of it (any failure is logged and swallowed; the wrapper itself
+    also appends {"error": ...} lines to the KPI log on gate failure)."""
+    try:
+        gate_dir = os.path.join(CKPT_DIR, "gate_tmp")
+        os.makedirs(gate_dir, exist_ok=True)
+        ck = os.path.join(gate_dir, f"ppo_{args.tag}_gate_upd{update:05d}.pt")
+        torch.save({"model": policy.state_dict(), "update": update,
+                    "arch": args.arch, "args": vars(args)}, ck)
+        cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "gate_kpi_wrapper.py"),
+               "--ckpt", ck, "--update", str(update),
+               "--games", str(args.gate_games), "--workers", str(args.gate_workers),
+               "--log", args.gate_log, "--tag", args.tag]
+        with open(ck + ".log", "w") as logf:
+            subprocess.Popen(cmd, cwd=_ROOT, stdout=logf, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+        print(f"   > gate KPI launched (detached) @ upd {update}: "
+              f"{args.gate_games} games -> {os.path.basename(args.gate_log)}")
+    except Exception as e:                                   # noqa: BLE001
+        print(f"   ! gate KPI launch failed (training continues): {e}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arch", choices=["mlp", "cardaware", "cardaware_history"], default="cardaware")
@@ -229,6 +354,31 @@ def main():
                      help="checkpoint selection uses min(score vs each eval-pool member individually) "
                           "instead of the aggregate mixed-table pool score -- a checkpoint only counts "
                           "as 'best' if it improves the WORST individual matchup, not just the average")
+    # ── M3 Track C (all default OFF -- defaults preserve legacy behavior exactly) ──
+    ap.add_argument("--gate-every", type=int, default=0,
+                     help="every N updates, run the frozen gate yardstick (eval_policy_gates.py) "
+                          "on a temp checkpoint as a DETACHED subprocess; results append to "
+                          "--gate-log as KPI cards (0=off)")
+    ap.add_argument("--gate-games", type=int, default=2000,
+                     help="games per gate KPI run (frozen card uses 6000; 2000 for speed)")
+    ap.add_argument("--gate-workers", type=int, default=2,
+                     help="workers for the gate subprocess (machine is shared with the live "
+                          "online campaign -- keep total <= 4)")
+    ap.add_argument("--gate-log", type=str,
+                     default=os.path.join(DATA_DIR, "rl_kpi_log.jsonl"),
+                     help="append-only JSONL KPI log written by the gate wrapper")
+    ap.add_argument("--luck-baseline", action="store_true",
+                     help="subtract E[score | dealt hand] (aw_weights.py fit on the online human "
+                          "games snapshot) from the terminal reward at collect time")
+    ap.add_argument("--luck-data", type=str,
+                     default=os.path.join(DATA_DIR, "online_games.jsonl"),
+                     help="online games JSONL the luck baseline is fit on (snapshotted at startup)")
+    ap.add_argument("--kl-ref", type=str, default="",
+                     help="frozen reference checkpoint for a per-decision KL(pi||pi_ref) loss "
+                          "penalty (anchored RL); empty=off")
+    ap.add_argument("--kl-beta", type=float, default=0.0,
+                     help="coefficient of the KL(pi||pi_ref) penalty (0=off; fixed beta for "
+                          "Phase 1, adaptive beta is a TODO in ppo_update)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -253,6 +403,16 @@ def main():
     print(f"device={device}  arch={args.arch}  params={nparams:,}  warmup={warmup}  "
           f"league={league} pool={len(pool)} learner_seats={args.learner_seats if league else 4}")
 
+    # ── M3 Track C setup (all no-ops unless the flags are set) ──
+    luck_fn = None
+    if args.luck_baseline:
+        luck_fn = _make_luck_fn(_fit_luck_baseline(args.luck_data))
+        _LUCK_DEBUG["left"] = 6            # print the first few subtractions
+    kl_ref = None
+    if args.kl_ref:
+        kl_ref = _load_frozen(args.kl_ref, args.arch, device)
+        print(f"[kl-ref] frozen reference={os.path.basename(args.kl_ref)} beta={args.kl_beta}")
+
     if args.eval_pool_ckpts:
         eval_members = [(os.path.splitext(os.path.basename(p.strip()))[0], p.strip(), args.arch)
                          for p in args.eval_pool_ckpts.split(",") if p.strip()]
@@ -269,13 +429,18 @@ def main():
         t0 = time.time()
         records, logp_old, adv, ret = collect(
             env, policy, args.games_per_batch, args.gamma, args.lam, args.reward_scale,
-            pool=(pool if league else None), learner_seats=args.learner_seats)
+            pool=(pool if league else None), learner_seats=args.learner_seats,
+            luck_fn=luck_fn)
         st, n_steps = ppo_update(policy, opt, records, logp_old, adv, ret, device,
                                  args.epochs, args.minibatch, args.clip,
-                                 args.vf_coef, args.ent_coef, args.max_grad)
+                                 args.vf_coef, args.ent_coef, args.max_grad,
+                                 kl_ref=kl_ref, kl_beta=args.kl_beta)
         dt = time.time() - t0
+        klref_col = (f"| klref {st['klref']:.5f} "
+                     if (kl_ref is not None and args.kl_beta > 0.0) else "")
         print(f"upd {update:3d}/{args.updates} | steps {n_steps:5d} | lr {opt.param_groups[0]['lr']:.2e} "
-              f"| pi {st['pi']:+.4f} | v {st['v']:.3f} | ent {st['ent']:.3f} | kl {st['kl']:+.4f} | {dt:.1f}s")
+              f"| pi {st['pi']:+.4f} | v {st['v']:.3f} | ent {st['ent']:.3f} | kl {st['kl']:+.4f} "
+              f"{klref_col}| {dt:.1f}s")
 
         if update % args.eval_every == 0 or update == args.updates:
             res = run_eval(policy, args.eval_games)
@@ -324,6 +489,10 @@ def main():
             payload = {"model": policy.state_dict(), "update": update,
                        "arch": args.arch, "args": vars(args)}
             torch.save(payload, os.path.join(CKPT_DIR, f"ppo_{args.tag}_latest.pt"))
+
+        # M3 Track C: periodic frozen-gate KPI card (detached; never blocks/crashes)
+        if args.gate_every > 0 and update % args.gate_every == 0:
+            launch_gate_kpi(policy, args, update)
 
 
 if __name__ == "__main__":

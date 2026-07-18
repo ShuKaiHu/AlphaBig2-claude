@@ -51,16 +51,21 @@ def _snapshot(acting, remaining, cardsPlayed, control, trick_cards, trick_owner,
     return g
 
 
-def build_records(target="human", verbose=True, snapshot=None):
+def build_records(target="human", verbose=True, snapshot=None, data_path=None):
     """snapshot: optional path to a json list of game ids -> restrict to those
-    games (nested data-size scaling experiments). None = full corpus."""
-    games = [json.loads(l) for l in open(DATA)]
+    games (nested data-size scaling experiments). None = full corpus.
+    data_path: read games from this file instead of the live DATA jsonl — the
+    live file is appended to by the harvest job, so weighted-BC runs must pin a
+    frozen snapshot or the (gid, seat) weight join silently misses new games."""
+    games = [json.loads(l) for l in open(data_path or DATA)]
     if snapshot:
         from ppo.parse_online_games import game_id as _gid
         ids = set(json.load(open(snapshot)))
         games = [g for g in games if (g.get("id") or _gid(g)) in ids]
     records, n_dec, n_skip = [], 0, 0
     for g in games:
+        from ppo.aw_weights import game_key
+        gid = game_key(g)   # join key for per-(game, seat) sample weights (aw_weights.wmap)
         hands = {int(s): list(map(int, g["hands"][s])) for s in g["hands"]}
         our = g["our_seat"]; winner = g["winner"]
         played = {s: [] for s in range(4)}
@@ -102,6 +107,7 @@ def build_records(target="human", verbose=True, snapshot=None):
                     records.append({"obs": obs,
                                     "feats": ACTION_FEATURES[legal].astype(np.float32),
                                     "pos": pos,
+                                    "gid": gid, "seat": s,
                                     "belief": belief_target_from_env(shim),  # oracle, loss-only
                                     "bmask": unseen_mask_from_obs(obs)})
             # apply event (match engine: play keeps others' passed flags; only
