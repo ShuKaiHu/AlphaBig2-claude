@@ -16,6 +16,15 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 - **檢查**:`pgrep -f resume_ab2`;各臂局數見 status.sh
 - **完賽後**:三臂面板(主指標=線上機制指紋:領五率/囤2率,用正確 3-pass trick 追蹤)→ 指紋轉移裁決 → M3 選型規則定案。事前判讀規則寫在 `Big2VisionAgent-claude/run_awbc_ab2_online.sh` 頭部,不許事後改。
 
+### 線 2b:m3p1_400 續訓(RL Phase 2 前哨)
+- **狀態**:TRAINING(從 m3p1_200 熱啟動再 200 updates,seed 8,KL 錨仍 policy_4500;估 ~2h)
+- **負責 session**:`ef4fa0ae`
+- **完訓後**:①改名 ppo_m3p1_400.pt ②同 8,555 局面跑正典 last-chance 統計出表
+  ③AB2 完賽 + 本訓練完成後 → 啟動 AB3(run_ab3_m3p1_online.sh:m3p1_200 vs m3p1_400 各300局,
+  事前判讀寫在腳本頭)
+- **背景**:正典指標(真人85.7%)已定案;m3p1_200=72.9%(latest 改名;best=upd30 是 500 局小評估的
+  幸運峰,已棄用);選型器的雜訊問題記錄在案,Phase 2 要修
+
 ### 線 2:M3 Phase 1(錨定 RL 機制探針)
 - **狀態**:✅ DONE — **裁決:D2-via-RL = NULL**(照事前規則)。200 updates 完訓,KL 錨全程 0.02-0.05 nats。
 - **判決依據**:34 保留位置 sampled 囤2率 64.5% vs 基線 64.0%(argmax 完全相同);**訓練集 286 位置也沒動**(45.1% vs 46.4%)→ 不是背題,是沒學。附帶:policy 整體有學(G4a +0.13→+0.68、領五 +4pp),自然對局 G2 的 52.9→33.3% 是小 n(≈15)+ 選擇效應混淆,依規不採信。
