@@ -17,7 +17,9 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 - **完賽後**:三臂面板(主指標=線上機制指紋:領五率/囤2率,用正確 3-pass trick 追蹤)→ 指紋轉移裁決 → M3 選型規則定案。事前判讀規則寫在 `Big2VisionAgent-claude/run_awbc_ab2_online.sh` 頭部,不許事後改。
 
 ### 線 2:M3 Phase 1(錨定 RL 機制探針)
-- **狀態**:TRAINING(2026-07-18 深夜啟動,tag `m3p1`,200 updates 估 1.5-3h)。接線已過三方驗證並 commit(858def2)。
+- **狀態**:✅ DONE — **裁決:D2-via-RL = NULL**(照事前規則)。200 updates 完訓,KL 錨全程 0.02-0.05 nats。
+- **判決依據**:34 保留位置 sampled 囤2率 64.5% vs 基線 64.0%(argmax 完全相同);**訓練集 286 位置也沒動**(45.1% vs 46.4%)→ 不是背題,是沒學。附帶:policy 整體有學(G4a +0.13→+0.68、領五 +4pp),自然對局 G2 的 52.9→33.3% 是小 n(≈15)+ 選擇效應混淆,依規不採信。
+- **後續**:Phase 2 的 D2 目標取消;M3-for-D1(強牌)是否立案等 AB2 指紋轉移裁決。
 - **負責 session**:`ef4fa0ae`
 - **內容**:單一問題 —— 錨定 PPO + 50% D2 注入,動不動得了囤2率?config:init/KL-ref/對手全 policy_4500、kl-beta 0.02、ent 0.01、luck-baseline on、seed 7
 - **主裁判**:`eval_injected_d2.py --ckpt ppo/checkpoints/ppo_m3p1_best.pt --reps 30 --seed-base 0` 對 34 保留位置,vs `ppo/data/injected_d2_baseline.json`(基線 sampled 64.0% / argmax 64.7%)
