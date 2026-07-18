@@ -1,0 +1,48 @@
+# 多線狀態板(STATUS.md)
+
+> **新 session 開場程序**:① 讀這個檔 ② 跑 `./status.sh` 對帳(板子可能過期,process 不說謊)
+> ③ 接手某條線之前,把「負責 session」欄改成自己的 session id 並 commit。
+> **更新紀律**:啟動/暫停/完成任何一條線的 session,必須當場更新本檔並 commit。
+
+_最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
+
+## 🟢 進行中
+
+### 線 1:AB2 三臂線上測試(P5)
+- **狀態**:RUNNING(自動續跑迴圈,瀏覽器崩潰會自癒)
+- **負責 session**:`ef4fa0ae`(2026-07-16 起的馬拉松 session)
+- **內容**:ctrl(policy_4500)/ T40_last(指紋派)/ T40_best(分數派)各 300 局,50 局腿交錯
+- **進度**:C 163+ / L 150 / B 150 → 300;ETA ~2026-07-19 中午前
+- **檢查**:`pgrep -f resume_ab2`;各臂局數見 status.sh
+- **完賽後**:三臂面板(主指標=線上機制指紋:領五率/囤2率,用正確 3-pass trick 追蹤)→ 指紋轉移裁決 → M3 選型規則定案。事前判讀規則寫在 `Big2VisionAgent-claude/run_awbc_ab2_online.sh` 頭部,不許事後改。
+
+### 線 2:M3 Phase 1(錨定 RL 機制探針)
+- **狀態**:WIRING(workflow `wf_4f34aceb` 建置中:collect() 注入接線 + D2 注入式評估器)→ 過驗證後由負責 session 直接放訓練(已獲使用者授權,不再等確認)
+- **負責 session**:`ef4fa0ae`
+- **內容**:單一問題 —— 錨定 PPO + 50% D2 注入,動不動得了囤2率?config:init/KL-ref/對手全 policy_4500、kl-beta 0.02、ent 0.01、luck-baseline on、200 updates(~2.5-4.5h)
+- **主裁判**:`eval_injected_d2.py` 在 34 個保留位置(sampled + argmax 雙讀數)vs `ppo/data/injected_d2_baseline.json`
+- **事前判讀**:sampled 囤2率顯著降 → 機制成立進 Phase 2;不動 → D2-via-RL 記 null
+- **檢查**:`pgrep -f ppo_trainer`;KPI 卡 `tail ppo/data/rl_kpi_log.jsonl`
+
+## ⏸ 待命 / 等待
+
+| 線 | 狀態 | 等什麼 |
+|---|---|---|
+| M3 Phase 2(完整 RL 配置) | 未開 | Phase 1 機制成立 + AB2 校準選型規則 |
+| M2(狀態條件加權 BC) | 未開 | AB2 指紋轉移裁決(轉移才值得做) |
+| 收割 flywheel(belief 訓練資料) | 閒置(master 6,225 局) | AB2 完賽後收割新局;belief 是唯一證實的資料槓桿 |
+| Chip:RL1/RL2 checkpoint 解剖(gate 工具加 history 架構) | 在使用者手上(task_ff36a986) | 使用者點擊;不擋任何線 |
+| Chip:bc_dataset trick 順序疑似 bug | 在使用者手上(task_5f6fae2a) | 使用者點擊 |
+
+## 🅿 停放(有紀錄、暫不動)
+
+- dominance V2(belief K-world 平均)——「dominance先放一邊」
+- value 去飽和(tanh/13)—— 未來 search 線的前提,M1/M3 期間不動
+- 炸彈壓制意願 G3 —— 掛監控,等資料累積
+
+## 📌 讀我之前先知道的事(不變的背景)
+
+- 版圖:唯一腦 repo = 這裡(main;value/ 在內);身 = `Big2VisionAgent-claude`。舊路徑 -ppo/-Value 不存在。
+- 北極星:線上對真人 avg_score。總缺口 -7.7/局,勝率通道占 77%。
+- 兩病灶:強牌轉換(G1)+ 輸勢囤2(G2);根因 = 純 BC 沒看過分數 + val_acc 早停 + argmax 坍縮。
+- 詳細戰略記憶在 Claude memory(MEMORY.md index),此檔只管「現在誰在做什麼」。
