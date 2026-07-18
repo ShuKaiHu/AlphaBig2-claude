@@ -22,8 +22,18 @@ class Big2Env:
         self._game = big2Game()
         self._done = False
 
-    def reset(self):
-        self._game.reset()
+    def reset(self, **kwargs):
+        """No-arg call is byte-identical to legacy behavior. ADDITIVE (M3
+        Phase 1): kwargs pass through to big2Game.reset (hands= for full-deal
+        injection, starter=, must_play_club3=)."""
+        self._game.reset(**kwargs)
+        self._done = False
+
+    def load_game(self, game):
+        """ADDITIVE (M3 Phase 1): adopt an externally constructed big2Game
+        (e.g. big2Game.restore_state(...) for MID-GAME injection) as the live
+        episode. Does not touch reset()/step() default paths."""
+        self._game = game
         self._done = False
 
     def step(self, action: int):

@@ -41,6 +41,50 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # first few luck-baseline subtractions are printed for eyeball verification
 _LUCK_DEBUG = {"left": 0}
+# first few injected episode starts are printed for eyeball verification
+_INJ_DEBUG = {"left": 0}
+
+
+def _start_d2_episode(env, rec):
+    """Start an episode from a D2 mid-game pool record (M3 Phase 1, Track A).
+
+    SEAT CONVENTION: pool records store 0-BASED seats (0-3);
+    big2Game.restore_state wants 1-BASED engine players (1-4). The +1
+    conversion happens HERE and only here. The `hands` dict from
+    d2_state_args is keyed 0-3, which restore_state's _normalize_hands_arg
+    maps to players seat+1 itself — consistent with the explicit +1 on
+    whose_turn / trick_owner / passed_players below, and with the
+    cards_played (4,52) mask whose row s is player s+1.
+
+    Returns the 1-BASED learner target seat = the record's caged-loss seat."""
+    from ppo.injection_pools import d2_state_args
+
+    from big2Game import big2Game
+    acting, remaining, cards_played, control, trick_cards, trick_owner, passed = \
+        d2_state_args(rec)
+    g = big2Game.restore_state(
+        hands=remaining,                        # {0..3}-keyed, mapped to seat+1
+        whose_turn=acting + 1,
+        trick_cards=(None if control else trick_cards),
+        trick_owner=(None if control else trick_owner + 1),
+        passed_players=tuple(q + 1 for q in passed),
+        cards_played=cards_played,              # (4,52) mask, row s = player s+1
+        must_play_club3=False)                  # mid-game: never force 3C
+    env.load_game(g)
+    return int(rec["seat"]) + 1
+
+
+def _start_d1_episode(env, rec):
+    """Start an episode from a D1 strong-full-deal pool record (M3 Phase 1).
+
+    A D1 record is a FULL 13-card deal, so this is a normal reset(hands=...):
+    the 3C holder starts and the forced-3C opening applies, exactly like a
+    natural deal — only the cards are a real online deal instead of random.
+    Pool seats are 0-based; reset(hands=) accepts the 0-3-keyed dict directly.
+
+    Returns the 1-BASED learner target seat = strong_seat + 1."""
+    env.reset(hands={s: rec["hands"][str(s)] for s in range(4)})
+    return int(rec["strong_seat"]) + 1
 
 
 def compute_gae(rewards, values, dones, gamma, lam):
@@ -55,7 +99,7 @@ def compute_gae(rewards, values, dones, gamma, lam):
 
 
 def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_seats=4,
-            luck_fn=None):
+            luck_fn=None, inject_d2=0.0, inject_d1=0.0, d2_pool=None, d1_pool=None):
     """Play n_games and gather the LEARNER's transitions.
 
     pool empty/None  -> pure current-policy self-play (all 4 seats = learner).
@@ -66,30 +110,73 @@ def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_s
     luck_fn (default None = exact legacy behavior): maps the learner seat's
       DEALT 13-card hand -> E[score | dealt hand]; subtracted from the terminal
       reward (deal-luck baseline, M3 Track C). Fit on 13-card STARTING hands
-      only — for injected mid-game episode starts it must be skipped
-      (luck_fn returns 0.0 for a non-13-card hand; see _make_luck_fn)."""
+      only — for injected D2 MID-GAME episode starts it is hard-skipped
+      (dealt hand recorded as None -> luck_fn returns 0.0; NOT a len!=13
+      check, because a mid-game seat can still hold exactly 13 cards).
+      Injected D1 episodes are real 13-card deals, so the baseline applies.
+
+    inject_d2 / inject_d1 (M3 Phase 1, defaults 0.0 = exact legacy behavior,
+      including the RNG stream — the per-episode uniform draw only happens
+      when a fraction is > 0): fractions of episodes started from D2 mid-game
+      caged-loss states (big2Game.restore_state) / D1 strong full deals
+      (reset(hands=...)) sampled uniformly from d2_pool / d1_pool (TRAIN
+      split). LEARNER SEAT for injected episodes: the trainer picks learner
+      seats per-episode (not per-worker), so we simply FORCE the pool
+      record's target seat into lseats (plus learner_seats-1 random others)
+      — the pool state's seats are never remapped, preserving the state's
+      semantics (turn order, trick owner, passed set) exactly as harvested.
+
+    Returns (records, logp_old, adv, ret, mix) where mix counts episode
+      starts: {"natural": n, "d2": n, "d1": n}."""
     records, logp_old, adv_all, ret_all = [], [], [], []
+    mix = {"natural": 0, "d2": 0, "d1": 0}
 
     for _ in range(n_games):
-        env.reset()
-        # TODO(M3 Phase 1 — INJECTED EPISODE STARTS): 30-50% of episodes should
-        # start from injected real-human game states (Track A state pools;
-        # D2 "caged loss holding a 2" occurs in only ~1.2% of natural self-play
-        # seat-games) instead of env.reset(). When wiring that in: an injected
-        # episode starts MID-GAME, so the dealt hand is NOT a 13-card starting
-        # hand and the luck baseline below MUST be 0 for that episode
-        # (luck_fn already returns 0.0 for len != 13 — keep that invariant).
+        target_seat, kind = None, "natural"
+        if inject_d2 > 0.0 or inject_d1 > 0.0:
+            u = float(np.random.rand())
+            if d2_pool and u < inject_d2:
+                rec = d2_pool[np.random.randint(len(d2_pool))]
+                target_seat = _start_d2_episode(env, rec)
+                kind = "d2"
+            elif d1_pool and u < inject_d2 + inject_d1:
+                rec = d1_pool[np.random.randint(len(d1_pool))]
+                target_seat = _start_d1_episode(env, rec)
+                kind = "d1"
+            else:
+                env.reset()
+            if kind != "natural" and _INJ_DEBUG["left"] > 0:
+                _INJ_DEBUG["left"] -= 1
+                extra = (" | luck baseline hard-skipped (mid-game)"
+                         if (kind == "d2" and luck_fn is not None) else "")
+                print(f"   [inject] {kind} game_id={rec['game_id']} "
+                      f"event_idx={rec.get('event_idx', '-')} "
+                      f"learner_seat={target_seat} (pool seat "
+                      f"{target_seat - 1} 0-based){extra}")
+        else:
+            env.reset()
+        mix[kind] += 1
         if pool:
-            lseats = set(int(s) for s in np.random.choice(
-                [1, 2, 3, 4], size=learner_seats, replace=False))
+            if target_seat is not None:
+                others = [p for p in (1, 2, 3, 4) if p != target_seat]
+                lseats = {target_seat} | set(
+                    int(s) for s in np.random.choice(
+                        others, size=learner_seats - 1, replace=False))
+            else:
+                lseats = set(int(s) for s in np.random.choice(
+                    [1, 2, 3, 4], size=learner_seats, replace=False))
             opp = {p: pool[np.random.randint(len(pool))]
                    for p in range(1, 5) if p not in lseats}
         else:
             lseats, opp = {1, 2, 3, 4}, {}
         seat = {p: {"rec": [], "logp": [], "val": []} for p in lseats}
         if luck_fn is not None:
-            # capture dealt hands NOW — currentHands mutates as plays occur
-            dealt = {p: [int(c) for c in env.game.currentHands[p]] for p in lseats}
+            if kind == "d2":
+                # mid-game start: baseline is out of distribution -> hard skip
+                dealt = {p: None for p in lseats}
+            else:
+                # capture dealt hands NOW — currentHands mutates as plays occur
+                dealt = {p: [int(c) for c in env.game.currentHands[p]] for p in lseats}
         rewards = None
         while not env.done:
             p = env.current_player
@@ -129,7 +216,8 @@ def collect(env, policy, n_games, gamma, lam, reward_scale, pool=None, learner_s
     return (records,
             np.asarray(logp_old, dtype=np.float32),
             np.asarray(adv_all, dtype=np.float32),
-            np.asarray(ret_all, dtype=np.float32))
+            np.asarray(ret_all, dtype=np.float32),
+            mix)
 
 
 def _load_frozen(path, arch, device):
@@ -280,9 +368,12 @@ def _make_luck_fn(base):
     """baseline(dealt hand) -> expected score from deal luck alone.
 
     IMPORTANT (M3 Phase 1 injection): the baseline is fit on 13-card STARTING
-    hands only. For injected MID-GAME episode starts the hand is not a fresh
-    13-card deal — out of distribution — so the baseline is SKIPPED (0.0).
-    collect() relies on this invariant."""
+    hands only. For injected D2 MID-GAME episode starts the hand is not a
+    fresh 13-card deal — out of distribution — so the baseline is SKIPPED:
+    collect() records the dealt hand as None for those episodes (an explicit
+    hard skip, NOT a len!=13 heuristic — a mid-game seat can still hold 13
+    cards) and luck_fn returns 0.0 for None. The len!=13 guard stays as a
+    second line of defense. Injected D1 full deals use the baseline normally."""
     from ppo.aw_weights import has_bomb, min_plays_to_empty, n_twos
 
     def luck_fn(hand):
@@ -379,7 +470,19 @@ def main():
     ap.add_argument("--kl-beta", type=float, default=0.0,
                      help="coefficient of the KL(pi||pi_ref) penalty (0=off; fixed beta for "
                           "Phase 1, adaptive beta is a TODO in ppo_update)")
+    # ── M3 Phase 1: injected episode starts (defaults 0.0 = exact legacy behavior) ──
+    ap.add_argument("--inject-d2", type=float, default=0.0,
+                     help="fraction of episodes started from a TRAIN-split D2 mid-game "
+                          "caged-loss state (big2Game.restore_state; learner forced to the "
+                          "record's target seat; luck baseline hard-skipped). 0=off")
+    ap.add_argument("--inject-d1", type=float, default=0.0,
+                     help="fraction of episodes started from a TRAIN-split D1 strong full "
+                          "deal (reset(hands=...); learner at strong_seat; luck baseline "
+                          "applies — 13-card hands). 0=off")
     args = ap.parse_args()
+    if args.inject_d2 < 0 or args.inject_d1 < 0 or args.inject_d2 + args.inject_d1 > 1.0:
+        raise ValueError(f"--inject-d2 + --inject-d1 must be in [0,1] "
+                         f"(got {args.inject_d2} + {args.inject_d1})")
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -412,6 +515,17 @@ def main():
     if args.kl_ref:
         kl_ref = _load_frozen(args.kl_ref, args.arch, device)
         print(f"[kl-ref] frozen reference={os.path.basename(args.kl_ref)} beta={args.kl_beta}")
+    d2_pool = d1_pool = None
+    if args.inject_d2 > 0.0 or args.inject_d1 > 0.0:
+        from ppo.injection_pools import load_d1_pool, load_d2_pool
+        if args.inject_d2 > 0.0:
+            d2_pool = load_d2_pool("train")     # NEVER the eval split
+        if args.inject_d1 > 0.0:
+            d1_pool = load_d1_pool("train")
+        _INJ_DEBUG["left"] = 6                 # print the first few injections
+        print(f"[inject] d2 frac={args.inject_d2} pool={len(d2_pool) if d2_pool else 0} "
+              f"| d1 frac={args.inject_d1} pool={len(d1_pool) if d1_pool else 0} "
+              f"(train split only)")
 
     if args.eval_pool_ckpts:
         eval_members = [(os.path.splitext(os.path.basename(p.strip()))[0], p.strip(), args.arch)
@@ -427,10 +541,12 @@ def main():
         for grp in opt.param_groups:
             grp["lr"] = lr_at(update, args.updates, args.lr, warmup)
         t0 = time.time()
-        records, logp_old, adv, ret = collect(
+        records, logp_old, adv, ret, inj_mix = collect(
             env, policy, args.games_per_batch, args.gamma, args.lam, args.reward_scale,
             pool=(pool if league else None), learner_seats=args.learner_seats,
-            luck_fn=luck_fn)
+            luck_fn=luck_fn,
+            inject_d2=args.inject_d2, inject_d1=args.inject_d1,
+            d2_pool=d2_pool, d1_pool=d1_pool)
         st, n_steps = ppo_update(policy, opt, records, logp_old, adv, ret, device,
                                  args.epochs, args.minibatch, args.clip,
                                  args.vf_coef, args.ent_coef, args.max_grad,
@@ -438,9 +554,11 @@ def main():
         dt = time.time() - t0
         klref_col = (f"| klref {st['klref']:.5f} "
                      if (kl_ref is not None and args.kl_beta > 0.0) else "")
+        inj_col = (f"| inj nat {inj_mix['natural']} d2 {inj_mix['d2']} d1 {inj_mix['d1']} "
+                   if (args.inject_d2 > 0.0 or args.inject_d1 > 0.0) else "")
         print(f"upd {update:3d}/{args.updates} | steps {n_steps:5d} | lr {opt.param_groups[0]['lr']:.2e} "
               f"| pi {st['pi']:+.4f} | v {st['v']:.3f} | ent {st['ent']:.3f} | kl {st['kl']:+.4f} "
-              f"{klref_col}| {dt:.1f}s")
+              f"{klref_col}{inj_col}| {dt:.1f}s")
 
         if update % args.eval_every == 0 or update == args.updates:
             res = run_eval(policy, args.eval_games)
