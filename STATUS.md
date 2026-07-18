@@ -17,12 +17,12 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 - **完賽後**:三臂面板(主指標=線上機制指紋:領五率/囤2率,用正確 3-pass trick 追蹤)→ 指紋轉移裁決 → M3 選型規則定案。事前判讀規則寫在 `Big2VisionAgent-claude/run_awbc_ab2_online.sh` 頭部,不許事後改。
 
 ### 線 2:M3 Phase 1(錨定 RL 機制探針)
-- **狀態**:WIRING(workflow `wf_4f34aceb` 建置中:collect() 注入接線 + D2 注入式評估器)→ 過驗證後由負責 session 直接放訓練(已獲使用者授權,不再等確認)
+- **狀態**:TRAINING(2026-07-18 深夜啟動,tag `m3p1`,200 updates 估 1.5-3h)。接線已過三方驗證並 commit(858def2)。
 - **負責 session**:`ef4fa0ae`
-- **內容**:單一問題 —— 錨定 PPO + 50% D2 注入,動不動得了囤2率?config:init/KL-ref/對手全 policy_4500、kl-beta 0.02、ent 0.01、luck-baseline on、200 updates(~2.5-4.5h)
-- **主裁判**:`eval_injected_d2.py` 在 34 個保留位置(sampled + argmax 雙讀數)vs `ppo/data/injected_d2_baseline.json`
-- **事前判讀**:sampled 囤2率顯著降 → 機制成立進 Phase 2;不動 → D2-via-RL 記 null
-- **檢查**:`pgrep -f ppo_trainer`;KPI 卡 `tail ppo/data/rl_kpi_log.jsonl`
+- **內容**:單一問題 —— 錨定 PPO + 50% D2 注入,動不動得了囤2率?config:init/KL-ref/對手全 policy_4500、kl-beta 0.02、ent 0.01、luck-baseline on、seed 7
+- **主裁判**:`eval_injected_d2.py --ckpt ppo/checkpoints/ppo_m3p1_best.pt --reps 30 --seed-base 0` 對 34 保留位置,vs `ppo/data/injected_d2_baseline.json`(基線 sampled 64.0% / argmax 64.7%)
+- **事前判讀(寫死)**:sampled 囤2率 ≤56%(降≥8pp)且 seed 777 復現方向 + gate KPI 無崩壞 → 機制成立進 Phase 2;±5pp 內 → D2-via-RL 記 null;5-8pp → 查 KL/entropy 曲線與注入 transitions 再裁
+- **檢查**:`pgrep -f ppo_trainer`;訓練 log `ppo/data/m3p1_train.log` 或 task 輸出;KPI 卡 `tail ppo/data/rl_kpi_log.jsonl`
 
 ## ⏸ 待命 / 等待
 
