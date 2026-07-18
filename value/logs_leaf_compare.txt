@@ -1,0 +1,41 @@
+game 1/30 | decisions 6 | 0.1 min
+game 2/30 | decisions 17 | 0.3 min
+game 3/30 | decisions 25 | 0.4 min
+game 4/30 | decisions 33 | 0.6 min
+game 5/30 | decisions 38 | 0.6 min
+game 6/30 | decisions 44 | 0.7 min
+game 7/30 | decisions 52 | 0.8 min
+game 8/30 | decisions 62 | 1.0 min
+game 9/30 | decisions 67 | 1.1 min
+game 10/30 | decisions 70 | 1.1 min
+game 11/30 | decisions 74 | 1.2 min
+game 12/30 | decisions 82 | 1.3 min
+game 13/30 | decisions 89 | 1.5 min
+game 14/30 | decisions 95 | 1.6 min
+game 15/30 | decisions 106 | 1.7 min
+game 16/30 | decisions 119 | 2.0 min
+game 17/30 | decisions 124 | 2.1 min
+game 18/30 | decisions 127 | 2.1 min
+game 19/30 | decisions 134 | 2.2 min
+game 20/30 | decisions 142 | 2.3 min
+game 21/30 | decisions 149 | 2.4 min
+game 22/30 | decisions 154 | 2.5 min
+game 23/30 | decisions 162 | 2.6 min
+game 24/30 | decisions 167 | 2.7 min
+game 25/30 | decisions 176 | 2.8 min
+game 26/30 | decisions 186 | 3.0 min
+game 27/30 | decisions 192 | 3.1 min
+game 28/30 | decisions 196 | 3.1 min
+game 29/30 | decisions 201 | 3.2 min
+game 30/30 | decisions 208 | 3.4 min
+
+=== leaf comparison (208 multi-option decisions, sims=64) ===
+speed:
+  rollout      441.8 ms/decision  (1.0x faster than rollout)
+  value        260.0 ms/decision  (1.7x faster than rollout)
+  value_aug    265.0 ms/decision  (1.7x faster than rollout)
+
+agreement (rollout = gold standard):
+  value      vs rollout :  96.6%
+  value_aug  vs rollout :  95.7%   <- want this HIGHER than the line above
+  value_aug  vs value   :  97.1%   (how often the feature changed the move)

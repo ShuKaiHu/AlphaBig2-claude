@@ -1,0 +1,29 @@
+  bomb decision 1/15 (n_legal=10)
+  bomb decision 2/15 (n_legal=49)
+  bomb decision 3/15 (n_legal=19)
+  bomb decision 4/15 (n_legal=14)
+  bomb decision 5/15 (n_legal=13)
+  bomb decision 6/15 (n_legal=10)
+  bomb decision 7/15 (n_legal=23)
+  bomb decision 8/15 (n_legal=12)
+  bomb decision 9/15 (n_legal=16)
+  bomb decision 10/15 (n_legal=8)
+  bomb decision 11/15 (n_legal=17)
+  bomb decision 12/15 (n_legal=22)
+  bomb decision 13/15 (n_legal=15)
+  bomb decision 14/15 (n_legal=9)
+  bomb decision 15/15 (n_legal=23)
+
+(510s)
+=== bomb timing diagnostic (n=15 decisions, k=5 worlds) ===
+  A_correctly_bombed    : 3/15 = 20.0%
+  B_missed_opportunity  : 1/15 = 6.7%
+  C_correctly_held      : 8/15 = 53.3%
+  D_unnecessary_bomb    : 3/15 = 20.0%
+
+  rollout says bomb IS optimal : 4/15 = 26.7%
+  policy actually played bomb  : 6/15 = 40.0%
+
+--- missed opportunities (bomb was best, policy held) ---
+  n_legal=49 gap=+0.340 roll_avg={8500: -0.42, 8504: -0.435, 8516: -0.467, 8520: -0.468, 8532: -0.453, 8536: -0.468, 8564: -0.467, 8568: -0.482, 8580: -0.467, 8584: -0.468, 8596: -0.453, 8600: -0.468, 9612: -0.421, 9613: -0.42, 9628: -0.435, 9629: -0.435, 9676: -0.468, 9677: -0.406, 9692: -0.482, 9693: -0.421, 9740: -0.468, 9741: -0.121, 9756: -0.468, 9757: -0.421, 9876: -0.454, 9877: -0.462, 9892: -0.435, 9893: -0.462, 9940: -0.467, 9941: -0.462, 9956: -0.482, 9957: -0.462, 10004: -0.467, 10005: -0.462, 10020: -0.469, 10021: -0.462, 10501: -0.483, 10505: -0.462, 10565: -0.496, 10569: -0.505, 10862: -0.496, 10866: -0.496, 10926: -0.496, 10930: -0.496, 11153: -0.482, 11157: -0.496, 11217: -0.496, 11221: -0.496, 14738: -0.283}
+EXIT 0

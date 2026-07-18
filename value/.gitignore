@@ -1,0 +1,31 @@
+# ---- NEVER commit: backups/archives (openclaw backup contains credentials) ----
+*.tar.gz
+*.tgz
+*.zip
+
+# ---- data dumps (self-play corpora, ~0.5GB each) ----
+data/
+
+# ---- runtime logs (logs_*.txt experiment RESULTS stay committable) ----
+logs/
+*.log
+
+# ---- model checkpoints: ignore all, whitelist deploy + online-tested ----
+checkpoints/*
+!checkpoints/VALUE_minplays.pt
+!checkpoints/value_best.pt
+!checkpoints/dominance_best.pt
+!checkpoints/FULLINFO_a2_AB.pt
+!checkpoints/PUBLIC_a2_AB.pt
+!checkpoints/V4PBV_Iter4_policy.pt
+!checkpoints/V4PBV_Iter4_value.pt
+!checkpoints/V4PBV_Iter9_policy.pt
+!checkpoints/V4PBV_Iter9_value.pt
+
+# ---- python ----
+__pycache__/
+*.pyc
+.venv/
+
+# ---- macOS ----
+.DS_Store

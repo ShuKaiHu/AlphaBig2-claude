@@ -1,0 +1,28 @@
+Alpha1 (ISMCTS sims=80 leaf=value_mp vdepth=0 belief=on) vs V4 | 100 games
+  5/100 | Alpha1 avg +2.00 | V4 avg -0.67 | 2.4s/game
+  10/100 | Alpha1 avg -4.80 | V4 avg +1.60 | 2.3s/game
+  15/100 | Alpha1 avg -3.13 | V4 avg +1.04 | 2.1s/game
+  20/100 | Alpha1 avg -3.45 | V4 avg +1.15 | 2.2s/game
+  25/100 | Alpha1 avg -2.92 | V4 avg +0.97 | 2.1s/game
+  30/100 | Alpha1 avg -2.43 | V4 avg +0.81 | 2.1s/game
+  35/100 | Alpha1 avg -2.57 | V4 avg +0.86 | 2.1s/game
+  40/100 | Alpha1 avg -0.90 | V4 avg +0.30 | 2.0s/game
+  45/100 | Alpha1 avg +0.27 | V4 avg -0.09 | 2.0s/game
+  50/100 | Alpha1 avg +3.38 | V4 avg -1.13 | 2.1s/game
+  55/100 | Alpha1 avg +2.75 | V4 avg -0.92 | 2.1s/game
+  60/100 | Alpha1 avg +2.93 | V4 avg -0.98 | 2.1s/game
+  65/100 | Alpha1 avg +2.17 | V4 avg -0.72 | 2.1s/game
+  70/100 | Alpha1 avg +2.00 | V4 avg -0.67 | 2.1s/game
+  75/100 | Alpha1 avg +2.11 | V4 avg -0.70 | 2.1s/game
+  80/100 | Alpha1 avg +2.73 | V4 avg -0.91 | 2.1s/game
+  85/100 | Alpha1 avg +2.01 | V4 avg -0.67 | 2.1s/game
+  90/100 | Alpha1 avg +2.28 | V4 avg -0.76 | 2.1s/game
+  95/100 | Alpha1 avg +2.20 | V4 avg -0.73 | 2.1s/game
+  100/100 | Alpha1 avg +2.71 | V4 avg -0.90 | 2.1s/game
+
+=== RESULT ===
+Alpha1: avg +2.71  (per game, 100 games)  win 27%
+V4    : avg -0.90  (per seat, 300 seat-games)
+Alpha1 − V4 margin: +3.61 / game
+(Alpha1 = V4 + ISMCTS; positive margin = the search helps. 4-player chance win rate = 25%.)
+search OVERRODE greedy action: 51/654 = 7.8% of decisions

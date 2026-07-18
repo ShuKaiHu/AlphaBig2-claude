@@ -1,0 +1,8 @@
+value records: 200000 (1/game) from 200000 games, skipped 0
+computing dominance + min-plays features ...
+train 180000 / val 20000 | device mps
+=== A/B ===
+  [plain] best val MSE 0.1358 (base 0.2561) | r +0.687 | sign 76.3%
+  [aug] best val MSE 0.1239 (base 0.2561) | r +0.719 | sign 78.4%
+
+features effect: MSE 0.1358 -> 0.1239 (+8.8%) | r +0.687 -> +0.719
