@@ -25,7 +25,7 @@ from ppo.parse_online_games import game_id as gid
 from fullinfo_value_model import fullinfo_obs_from_env
 from value_model import SCALE
 
-PPO = "/Users/shukaihu/Code_Project_Local/AlphaBig2-ppo"
+PPO = "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude"
 BUILD_SEED = 777   # pin deal-residue RNG so build_game is deterministic (see play_fixed_deals fix)
 
 _net = CardAwareActorCritic()

@@ -54,8 +54,8 @@ _ROOT_NOISE_EPS = 0.25     # weight of the noise vs the policy prior
 _ROOT_NOISE_ALPHA = 0.3    # Dirichlet concentration
 _MIN_VISITS = 0            # force every root action to >=N visits before PUCT free-selection (0=off)
 torch.set_num_threads(1)
-SAVED = "/Users/shukaihu/Code_Project_Local/AlphaBig2-ppo/ppo/checkpoints/saved"
-VALUE_CKPT = "/Users/shukaihu/Code_Project_Local/AlphaBig2-Value/checkpoints/VALUE.pt"
+SAVED = "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude/ppo/checkpoints/saved"
+VALUE_CKPT = "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude/value/checkpoints/VALUE.pt"
 
 _policy = CardAwareActorCritic().to(DEV)
 _policy.load_state_dict(torch.load(f"{SAVED}/PPO_V4.pt", map_location=DEV)["model"]); _policy.eval()
@@ -66,7 +66,7 @@ _value.load_state_dict(torch.load(VALUE_CKPT, map_location=DEV)["model"]); _valu
 _value_aug = None      # ValueNet(extra_dim=4): VALUE + dominance probs + min-plays (4-dim)
 _value_mp = None       # ValueNet(extra_dim=1): VALUE + min-plays only — the DEPLOY value
 _dom = None            # DominanceNet, only needed by the 4-dim aug leaf
-CKPT_DIR = "/Users/shukaihu/Code_Project_Local/AlphaBig2-Value/checkpoints"
+CKPT_DIR = "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude/value/checkpoints"
 
 
 def _load_aug(value_ckpt=f"{CKPT_DIR}/value_aug.pt", dom_ckpt=f"{CKPT_DIR}/dominance_best.pt",

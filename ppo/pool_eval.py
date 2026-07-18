@@ -25,7 +25,7 @@ from engine.env import Big2Env
 
 _HERE = os.path.dirname(__file__)
 _PPO_SAVED = os.path.join(_HERE, "checkpoints", "saved")
-_VALUE_CKPT = os.path.join(_HERE, "..", "..", "AlphaBig2-Value", "checkpoints")
+_VALUE_CKPT = os.path.join(_HERE, "..", "value", "checkpoints")
 
 # (name, path, arch) -- every distinct policy checkpoint produced by this
 # project so far. "cardaware_history"/"v6" members need their own net class;

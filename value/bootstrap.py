@@ -9,7 +9,7 @@ not affect where outputs land.
 import os
 import sys
 
-AB2PPO = os.environ.get("AB2PPO", "/Users/shukaihu/Code_Project_Local/AlphaBig2-ppo")
+AB2PPO = os.environ.get("AB2PPO", "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude")
 VALUE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(VALUE_DIR, "data")
 CKPT_DIR = os.path.join(VALUE_DIR, "checkpoints")

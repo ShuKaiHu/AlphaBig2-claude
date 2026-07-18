@@ -18,7 +18,7 @@ from fullinfo_value_model import FullInfoValueNet
 from value_model import ValueNet, SCALE
 
 DEV = "cpu"
-VAL = "/Users/shukaihu/Code_Project_Local/AlphaBig2-Value"   # bootstrap chdirs away; use abs paths
+VAL = "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude/value"   # bootstrap chdirs away; use abs paths
 PUB_KEYS = ["hand_ids", "trick", "seen", "opp", "counts", "passc"]
 
 

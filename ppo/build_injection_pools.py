@@ -40,7 +40,7 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
-sys.path.insert(0, "/Users/shukaihu/Code_Project_Local/AlphaBig2-Value")
+sys.path.insert(0, "/Users/shukaihu/Code_Project_Local/AlphaBig2-claude/value")
 
 from hand_features import min_plays_to_empty, has_bomb_rank_suit  # canonical
 from ppo.bc_dataset import _snapshot

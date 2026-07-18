@@ -44,8 +44,8 @@
 ## Quick start
 
 ```bash
-PY=/Users/shukaihu/Code_Project_Local/AlphaBig2-ppo/.venv/bin/python
-cd /Users/shukaihu/Code_Project_Local/AlphaBig2-Value
+PY=/Users/shukaihu/Code_Project_Local/AlphaBig2-claude/.venv/bin/python
+cd /Users/shukaihu/Code_Project_Local/AlphaBig2-claude/value
 $PY selfplay.py --games 40000 --policy PPO_V4.pt   # step 1 (accumulates)
 $PY train_value.py --epochs 40                     # steps 2+3 (1 sample/game)
 ```

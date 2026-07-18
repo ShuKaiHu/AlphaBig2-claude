@@ -51,8 +51,7 @@ from big2Game import big2Game
 from engine.env import Big2Env, PASS_IDX
 
 # ── min-plays / greedy decomposition: the SAME code the value line uses ──────
-_HAND_FEATURES_PATH = os.path.join(
-    os.path.dirname(_HERE), "AlphaBig2-Value", "hand_features.py")
+_HAND_FEATURES_PATH = os.path.join(_HERE, "value", "hand_features.py")
 
 _spec = importlib.util.spec_from_file_location("value_hand_features", _HAND_FEATURES_PATH)
 _HF = importlib.util.module_from_spec(_spec)
