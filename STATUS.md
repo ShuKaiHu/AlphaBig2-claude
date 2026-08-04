@@ -8,6 +8,23 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 
 ## 🟢 進行中
 
+### 線 VCOL:Value 反塌縮 A/B(六臂)
+- **狀態**:接手中(2026-08-04)—— 快篩 → 正式 200k×30ep 六臂
+- **負責 session**:`6f7a86c6`(本機;branch `claude/transformer-architecture-breakdown-lyw64b`)
+- **背景(remote session 已完成)**:`value_best.pt` 手牌 attention 路塌縮 —— 探針
+  R²(hand_vec→min_plays)≈0.000(比隨機初始化 0.032 還差)、共用 emb 表 row norm 7.9→0.38、
+  softmax 退化成均勻;同款編碼器直接監督 43 秒學到 R²=0.87 ⇒ 瓶頸是訊號+結構,不是容量。
+- **臂**:plain(現部署) / featref(手寫 min_plays 特徵,**只當量尺不部署**) /
+  B 拆表 / C preLN+袋平均 / D 殘差+自家張數 / BCD 全開
+- **事前判讀**:寫死在 `value/train_value_collapse_ab.py` 檔頭(①探針 R²≥0.30 且
+  emb-norm>1.0 = 塌縮已解 ②BCD vs plain ≥0.5% 有效 / ±0.5% null / 更差有害
+  ③BCD ≤ featref×1.01 = 自學可取代手寫特徵 ④邊界 ±0.5% 內先跑 --seed 1 復現方向)。
+  **不許看到結果後修改。**
+- **鐵律**:min_plays 只准當 input,**不許當 loss / auxiliary target**(使用者裁決:
+  那會把貪婪啟發式的偏見焊進表徵)。
+- **檢查**:`pgrep -f train_value_collapse_ab`;log `value/logs_collapse_ab.txt`
+- ⚠️本 branch 的 STATUS.md 是舊快照(落後 main 的 V2S / 五臂線上測收官);合回去時以 main 為準。
+
 ### 線 1:AB2 三臂線上測試(P5)
 - **狀態**:RUNNING(自動續跑迴圈,瀏覽器崩潰會自癒)
 - **負責 session**:`ef4fa0ae`(2026-07-16 起的馬拉松 session)
@@ -44,7 +61,7 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 | 收割 flywheel(belief 訓練資料) | 閒置(master 6,225 局) | AB2 完賽後收割新局;belief 是唯一證實的資料槓桿 |
 | Chip:RL1/RL2 checkpoint 解剖(gate 工具加 history 架構) | 在使用者手上(task_ff36a986) | 使用者點擊;不擋任何線 |
 | Chip:bc_dataset trick 順序疑似 bug | 在使用者手上(task_5f6fae2a) | 使用者點擊 |
-| Value 反塌縮 A/B(B拆表/C預LN+袋平均/D殘差+自家張數) | 程式碼已備:`value/train_value_collapse_ab.py`(事前判讀在腳本頭;背景:value_best 手牌路探針 R²≈0,emb norm 塌到 0.38) | 使用者本機跑(需 selfplay 語料;容器無) |
+| ~~Value 反塌縮 A/B~~ | **已接手,移至下方「🟢 進行中」**(負責 session `6f7a86c6`) | — |
 
 ## 🅿 停放(有紀錄、暫不動)
 
