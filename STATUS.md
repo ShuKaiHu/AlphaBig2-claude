@@ -44,6 +44,7 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 | 收割 flywheel(belief 訓練資料) | 閒置(master 6,225 局) | AB2 完賽後收割新局;belief 是唯一證實的資料槓桿 |
 | Chip:RL1/RL2 checkpoint 解剖(gate 工具加 history 架構) | 在使用者手上(task_ff36a986) | 使用者點擊;不擋任何線 |
 | Chip:bc_dataset trick 順序疑似 bug | 在使用者手上(task_5f6fae2a) | 使用者點擊 |
+| Value 反塌縮 A/B(B拆表/C預LN+袋平均/D殘差+自家張數) | 程式碼已備:`value/train_value_collapse_ab.py`(事前判讀在腳本頭;背景:value_best 手牌路探針 R²≈0,emb norm 塌到 0.38) | 使用者本機跑(需 selfplay 語料;容器無) |
 
 ## 🅿 停放(有紀錄、暫不動)
 
