@@ -14,7 +14,7 @@
 ═══════════════════════════════════════════
 
 用法:python3 scripts/hand_score_v2.py
-輸出:stdout + reports/hand_score_v2.md + ppo/data/hand_score_v2_weights.json
+輸出:stdout + reports/hand_score_v2.md + reports/hand_score_v2_weights.json
 """
 import json
 import os
