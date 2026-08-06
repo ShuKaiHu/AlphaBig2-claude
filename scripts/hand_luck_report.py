@@ -32,7 +32,13 @@ from collections import Counter
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from value.hand_features import has_bomb_rank_suit, min_plays_to_empty  # 正典,不許手寫
+from value.hand_features import (  # 正典,不許手寫
+    STRAIGHT_WINDOWS_RIDX,
+    has_bomb_rank_suit,
+    min_plays_to_empty,
+)
+
+_WIN_SORTED = sorted(sorted(w) for w in STRAIGHT_WINDOWS_RIDX)
 
 N_MC = 100_000
 N_PERM = 100_000
@@ -50,8 +56,29 @@ INDEX_DEFS = [
     ("min_plays",  "greedy 最少出完手數(小=好)",       -1, True),
     ("n_dead_low", "低廢單張數(3-6 的孤張)",           -1, True),
     ("spade2",     "持有黑桃 2",                        +1, False),
+    ("n_quads",    "鐵支次數",                          +1, False),
+    ("n_sf",       "同花順次數(每花色貪婪不重疊窗)",   +1, False),
+    ("n_bombs",    "炸彈合計次數(鐵支+同花順)",        +1, False),
 ]
 COMPOSITE_KEYS = [k for k, _, _, inc in INDEX_DEFS if inc]
+
+
+def bomb_counts(cards):
+    """回傳 (鐵支數, 同花順數)。SF 以每花色貪婪取不重疊窗計次;
+    鐵支佔滿四花色,不可能與 SF 共用牌,兩者可直接相加。"""
+    rc = Counter((c - 1) // 4 for c in cards)
+    n_quads = sum(1 for n in rc.values() if n == 4)
+    by_suit = {}
+    for c in cards:
+        by_suit.setdefault((c - 1) % 4, set()).add((c - 1) // 4)
+    n_sf = 0
+    for ranks in by_suit.values():
+        avail = set(ranks)
+        for w in _WIN_SORTED:
+            if set(w) <= avail:
+                n_sf += 1
+                avail -= set(w)
+    return n_quads, n_sf
 
 
 def hand_indices(cards):
@@ -59,7 +86,11 @@ def hand_indices(cards):
     ridx = [(c - 1) // 4 for c in cards]
     pairs = [((c - 1) // 4, (c - 1) % 4) for c in cards]
     rc = Counter(ridx)
+    n_quads, n_sf = bomb_counts(cards)
     return {
+        "n_quads": n_quads,
+        "n_sf": n_sf,
+        "n_bombs": n_quads + n_sf,
         "n_twos": rc.get(12, 0),
         "n_aces": rc.get(11, 0),
         "n_high": sum(rc.get(r, 0) for r in (10, 11, 12)),
