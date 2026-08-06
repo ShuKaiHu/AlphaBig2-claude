@@ -4,16 +4,15 @@ win/loss 與 score(reward)的預測力驗證。
 
 - 資料:ppo/data/online_games.jsonl(含 winner 與四家 scores)。
 - 綜合分:沿用 scripts/hand_luck_report.py 的事前定義(8 項標準化等權),不改。
-- 相關:win/loss 用 point-biserial(即 Pearson)+ AUC;score 用 Pearson + Spearman。
-- 兩個母體都報:①只看我們的座位(n=局數)②四家全部(n=4×局數;同局四家
-  互相依賴,相關值僅作描述,不做獨立性檢定)。
+- 相關一律報 R²(附方向):win/loss 用 point-biserial²+AUC;score 用 Pearson²+Spearman²。
+- 主母體 = 真人三家(排除我們的座位;我們的 agent 轉換差會污染「手牌→結果」估計)。
+  我們的座位另列作對照。同局三家真人互相依賴,R² 作描述用。
 
 用法:python3 scripts/hand_luck_outcome.py [--n-mc 50000]
 輸出:stdout + reports/hand_luck_outcome.md
 """
 import argparse
 import json
-import math
 import os
 import sys
 
@@ -92,9 +91,13 @@ def main():
     luck_pct = 100.0 * np.searchsorted(comp_mc, comp) / len(comp_mc)     # (G,4)
 
     ar = np.arange(G)
+    opp_mask = np.ones((G, 4), dtype=bool)
+    opp_mask[ar, our_col] = False
     pops = {
-        "我們的座位": (comp[ar, our_col], win[ar, our_col], score[ar, our_col], luck_pct[ar, our_col]),
-        "四家全部":   (comp.ravel(), win.ravel(), score.ravel(), luck_pct.ravel()),
+        "真人三家(有效資料,排除我們)":
+            (comp[opp_mask], win[opp_mask], score[opp_mask], luck_pct[opp_mask]),
+        "我們的座位(對照,agent 轉換污染)":
+            (comp[ar, our_col], win[ar, our_col], score[ar, our_col], luck_pct[ar, our_col]),
     }
 
     lines = []
@@ -107,13 +110,12 @@ def main():
     for name, (c, wn, sc, lp) in pops.items():
         n = len(c)
         r_win = pearson(c, wn)
-        se = 1 / math.sqrt(n - 3)
         r_sc = pearson(c, sc)
         rho_sc = pearson(rankdata(c), rankdata(sc))
         w(f"## {name}(n={n:,},勝率 {wn.mean()*100:.1f}%)")
         w("")
-        w(f"- 綜合分 × win/loss:point-biserial r = **{r_win:+.3f}**(±{1.96*se:.3f}),AUC = **{auc(c, wn):.3f}**")
-        w(f"- 綜合分 × score:Pearson r = **{r_sc:+.3f}**,Spearman ρ = **{rho_sc:+.3f}**")
+        w(f"- 綜合分 × win/loss:R² = **{r_win**2:.3f}**(方向 {'+' if r_win > 0 else '-'},r={r_win:+.3f}),AUC = **{auc(c, wn):.3f}**")
+        w(f"- 綜合分 × score:Pearson R² = **{r_sc**2:.3f}**(r={r_sc:+.3f}),Spearman R² = **{rho_sc**2:.3f}**(ρ={rho_sc:+.3f})")
         w("")
         w("| 牌運分十分位 | n | 勝率 | 平均 score |")
         w("|---|---|---|---|")
@@ -121,18 +123,18 @@ def main():
             m = (lp >= b * 10) & (lp < b * 10 + 10) if b < 9 else (lp >= 90)
             w(f"| {b*10}–{b*10+10} | {int(m.sum()):,} | {wn[m].mean()*100:.1f}% | {sc[m].mean():+.2f} |")
         w("")
-    w("## 單項指標 ×結果(四家全部,描述用)")
+    w("## 單項指標 × 結果(真人三家,R²,方向對齊「高=好」後全為正相關)")
     w("")
-    w("| 指標 | 說明 | r(win) | r(score) | ρ(score) |")
+    w("| 指標 | 說明 | R²(win) | R²(score) | Spearman R²(score) |")
     w("|---|---|---|---|---|")
-    flat_w, flat_s = win.ravel(), score.ravel()
+    flat_w, flat_s = win[opp_mask], score[opp_mask]
     for k, desc, s, _ in INDEX_DEFS:
-        v = (vals[k] * s).ravel()          # 方向對齊「高=好」
-        w(f"| {k} | {desc} | {pearson(v, flat_w):+.3f} | {pearson(v, flat_s):+.3f} | "
-          f"{pearson(rankdata(v), rankdata(flat_s)):+.3f} |")
+        v = (vals[k] * s)[opp_mask]
+        w(f"| {k} | {desc} | {pearson(v, flat_w)**2:.3f} | {pearson(v, flat_s)**2:.3f} | "
+          f"{pearson(rankdata(v), rankdata(flat_s))**2:.3f} |")
     w("")
-    w("備註:四家全部的母體同局互相依賴(win 恰一家、score 零和),相關值僅描述;")
-    w("我們座位的 n 局彼此獨立,信賴區間可信。score 為神來也記分(勝者=三家剩牌和,敗者=−自己剩牌)。")
+    w("備註:同局三家真人互相依賴(win 至多一家、score 近零和),R² 作描述用。")
+    w("score 為神來也記分(勝者=三家剩牌和,敗者=−自己剩牌)。")
 
     report = "\n".join(lines) + "\n"
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
