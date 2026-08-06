@@ -36,7 +36,10 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 - **檢查**:`pgrep -f ppo_trainer`;訓練 log `ppo/data/m3p1_train.log` 或 task 輸出;KPI 卡 `tail ppo/data/rl_kpi_log.jsonl`
 
 ### 線 3:牌運統計(神來也發牌公平性)
-- **狀態**:RUNNING(雲端 session,分析 6,225 局收割資料)
+- **狀態**:✅ DONE — **裁決:NULL(照事前規則)**。6,225 局全數納入(0 排除),
+  綜合指標我們−同桌 = −0.0034 z(置換 p=0.55),vs 均勻 null z=−0.81(p=0.42),
+  平均牌運分 49.64/50,十項指標置換 p 全部 >0.3,牌運分分佈平坦。
+  報告:`reports/hand_luck_report.md`;之後想加新指標直接擴充 `scripts/hand_luck_report.py` 的 INDEX_DEFS 重跑。
 - **負責 session**:`card-luck-t03fa8`(claude/card-luck-statistics-t03fa8 分支)
 - **內容**:手牌好壞指標組(2/A/高張/點數和/炸彈/對子/min_plays 等)+ 兩層檢定:
   ①組內置換(我們 vs 同桌三家,回答「是否針對我們」)②vs 均勻發牌 MC null(洗牌器整體偏差)
