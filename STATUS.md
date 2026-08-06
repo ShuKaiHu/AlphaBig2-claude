@@ -35,6 +35,14 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 - **事前判讀(寫死)**:sampled 囤2率 ≤56%(降≥8pp)且 seed 777 復現方向 + gate KPI 無崩壞 → 機制成立進 Phase 2;±5pp 內 → D2-via-RL 記 null;5-8pp → 查 KL/entropy 曲線與注入 transitions 再裁
 - **檢查**:`pgrep -f ppo_trainer`;訓練 log `ppo/data/m3p1_train.log` 或 task 輸出;KPI 卡 `tail ppo/data/rl_kpi_log.jsonl`
 
+### 線 3:牌運統計(神來也發牌公平性)
+- **狀態**:RUNNING(雲端 session,分析 6,225 局收割資料)
+- **負責 session**:`card-luck-t03fa8`(claude/card-luck-statistics-t03fa8 分支)
+- **內容**:手牌好壞指標組(2/A/高張/點數和/炸彈/對子/min_plays 等)+ 兩層檢定:
+  ①組內置換(我們 vs 同桌三家,回答「是否針對我們」)②vs 均勻發牌 MC null(洗牌器整體偏差)
+- **事前判讀(寫死在 `scripts/hand_luck_report.py` 頭部)**:綜合指標置換 p<0.01 且方向為負才判「被針對」;否則記 NULL。指標逐項用 Holm 校正,僅作輔助。
+- **資料**:`ppo/data/online_games.jsonl`;排除只按機制(發牌不完整/不成 52 張分割),不按結果。
+
 ## ⏸ 待命 / 等待
 
 | 線 | 狀態 | 等什麼 |
