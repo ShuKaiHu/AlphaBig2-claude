@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaBig2 — 人機對戰台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🂡</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <span class="logo">AlphaBig2<span class="dim">/web</span></span>
+  <span id="conn" class="conn">●</span>
+  <span id="session-info" class="dim mono"></span>
+  <span class="spacer"></span>
+  <button id="btn-new" class="primary">新對局 ⏎</button>
+  <button id="btn-undo">悔棋 (u)</button>
+  <button id="btn-hint">分析 (a)</button>
+</header>
+
+<main>
+  <!-- 左:設定 -->
+  <aside id="config">
+    <h2>對局設定 <span class="dim">(新對局時生效)</span></h2>
+    <label>checkpoint
+      <select id="cfg-checkpoint"></select>
+    </label>
+    <label>AI 決策模式
+      <select id="cfg-mode">
+        <option value="mcts_det">mcts_det — 決定化 MCTS(線上同款,不偷看)</option>
+        <option value="greedy">greedy — 純 policy argmax(最快)</option>
+        <option value="mcts_fullinfo">mcts_fullinfo — 全知 MCTS(⚠ AI 偷看手牌,debug 用)</option>
+      </select>
+    </label>
+    <div class="row">
+      <label>sims/搜尋<input id="cfg-sims" type="number" value="50" min="1" max="1000"></label>
+      <label>dets/決定化數<input id="cfg-dets" type="number" value="4" min="1" max="32"></label>
+    </div>
+    <div class="row">
+      <label>c_puct<input id="cfg-cpuct" type="number" value="2.0" step="0.1"></label>
+      <label>dirichlet<input id="cfg-dirichlet" type="number" value="0.0" step="0.05" min="0" max="1"></label>
+    </div>
+    <label class="chk"><input id="cfg-belief" type="checkbox" checked> belief 加權決定化取樣</label>
+    <label class="chk"><input id="cfg-valuenet" type="checkbox" checked> 用 V9 全資訊 value net(checkpoint 有才生效)</label>
+    <div class="row">
+      <label>我的座位
+        <select id="cfg-seat">
+          <option value="random">隨機</option>
+          <option value="1">P1</option><option value="2">P2</option>
+          <option value="3">P3</option><option value="4">P4</option>
+        </select>
+      </label>
+      <label>seed<input id="cfg-seed" type="text" placeholder="(空=隨機)"></label>
+    </div>
+    <label class="chk"><input id="cfg-reveal" type="checkbox"> 👁 掀牌 debug(顯示所有手牌)</label>
+    <label class="chk"><input id="cfg-ainotes" type="checkbox"> 記錄 AI 每步 policy top-3</label>
+    <label class="chk"><input id="cfg-autohint" type="checkbox"> 輪到我時自動跑分析</label>
+    <div id="ckpt-note" class="note"></div>
+  </aside>
+
+  <!-- 中:牌桌 -->
+  <section id="table">
+    <div id="seats"></div>
+    <div id="center">
+      <div id="trick-label" class="dim"></div>
+      <div id="trick-cards" class="cardrow"></div>
+    </div>
+    <div id="my-area">
+      <div id="my-label"></div>
+      <div id="my-hand" class="cardrow"></div>
+      <div id="controls">
+        <button id="btn-play" class="primary" disabled>出牌 ⏎</button>
+        <button id="btn-pass" disabled>PASS (p)</button>
+        <span id="sel-info" class="dim"></span>
+      </div>
+      <div id="legal-list"></div>
+    </div>
+    <div id="overlay" class="hidden">
+      <div id="overlay-box"></div>
+    </div>
+  </section>
+
+  <!-- 右:log / 分析 / 統計 -->
+  <aside id="panel">
+    <nav>
+      <button data-tab="log" class="tab active">紀錄</button>
+      <button data-tab="analysis" class="tab">分析</button>
+      <button data-tab="stats" class="tab">統計</button>
+    </nav>
+    <div id="tab-log" class="tabpane active"></div>
+    <div id="tab-analysis" class="tabpane"><div class="dim pad">按「分析」或 a 鍵,看 model 對目前局面的 policy top-k / value / belief。</div></div>
+    <div id="tab-stats" class="tabpane"><div class="dim pad">尚無資料。</div></div>
+  </aside>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

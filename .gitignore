@@ -36,3 +36,4 @@ ppo/data/*
 
 # top-level scratch npz dumps (a2_* full-info value experiments)
 /data/
+web/human_games_web.jsonl
