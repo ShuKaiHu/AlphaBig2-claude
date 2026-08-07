@@ -35,6 +35,14 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 - **事前判讀(寫死)**:sampled 囤2率 ≤56%(降≥8pp)且 seed 777 復現方向 + gate KPI 無崩壞 → 機制成立進 Phase 2;±5pp 內 → D2-via-RL 記 null;5-8pp → 查 KL/entropy 曲線與注入 transitions 再裁
 - **檢查**:`pgrep -f ppo_trainer`;訓練 log `ppo/data/m3p1_train.log` 或 task 輸出;KPI 卡 `tail ppo/data/rl_kpi_log.jsonl`
 
+### 線 4:web 人機對戰台(工具,非實驗線)
+- **狀態**:✅ DONE(2026-08-07 建立)
+- **負責 session**:`c6de8a87`
+- **內容**:`web/` — 瀏覽器打 engine deploy checkpoints(greedy / 決定化 MCTS / 全知 MCTS 可選,
+  sims/dets/belief/c_puct/座位/seed/掀牌 全可調;policy top-k、value、belief 熱圖面板)。
+  起法:`python -m web.server` → :8288。完賽 log `web/human_games_web.jsonl`(gitignored)。
+- **注意**:這是收「人 vs model avg_score」訊號的工具;判讀鐵律同 play_human(看 avg_score,≥100 局)。
+
 ## ⏸ 待命 / 等待
 
 | 線 | 狀態 | 等什麼 |
