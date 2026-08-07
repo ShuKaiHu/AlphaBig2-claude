@@ -2,3 +2,4 @@ torch==1.13.1
 numpy==1.21.6
 # Optional: if you need GPU builds, install appropriate torch+cu version per https://pytorch.org
 # Add other dependencies if required (e.g., tensorflow, torchvision)
+flask  # web/ 人機對戰台後端
