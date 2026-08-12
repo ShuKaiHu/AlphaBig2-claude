@@ -1,5 +1,19 @@
 """Card-dominance (the "nuts") — deterministic logic, no neural net.
 
+⚠️ DEPRECATED for new code (2026-08-12) — use planner/control.py instead.
+Two rulings here are known-wrong under the corrected rules and are kept
+UNMODIFIED only because play_strengths/dominance_features are the frozen input
+encoding of deployed v6 checkpoints (BIG2_DOMINANCE=1) — changing them would
+silently break feature compatibility:
+  1. play_strengths hardcodes a lone ♠2 to strength 1.0 ("global nuts"), but a
+     quad/straight-flush DOES beat a lone ♠2 (big2Game.returnAvailableActions;
+     the old rules.md claim was stale documentation, fixed in the paper branch).
+  2. higher_straight_possible ranks straights by window-top rank value, which
+     mis-orders the wrap windows (2-3-4-5-6 is the HIGHEST straight per
+     gameLogic._STRAIGHT_SEQUENCES, not a near-lowest one).
+The low-level primitives unseen_cards / bomb_possible / straight_flush_possible
+are correct and remain the shared substrate (planner/control.py imports them).
+
 Answers the human question "is my card/combo currently unbeatable?" purely from
 public information (my hand + all played cards), by reasoning about the UNSEEN
 cards (those still in opponents' hands).
@@ -175,8 +189,9 @@ def play_strengths(my_hand, played) -> dict:
     sf = straight_flush_possible(unseen)      # SF override possible
     out = {}
 
-    # single: beaten by a higher single, or quad/SF override. ♠2 (id 52) is the
-    # global nuts — beats everything (rules.md).
+    # single: beaten by a higher single, or quad/SF override.
+    # FROZEN-WRONG (see module docstring): the ♠2==1.0 shortcut below ignores
+    # the quad/SF override; kept for v6 checkpoint feature compatibility.
     if hand:
         my_max = max(hand)
         out["single"] = 1.0 if my_max == 52 else _strength(
