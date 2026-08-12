@@ -44,6 +44,9 @@ class Big2MDPAgent:
         self.level = level
         self.cap = cap
         self.depth_max = depth_max
+        # introspection for the online wrapper / dashboard: set on every
+        # decision; never read by the decision logic itself.
+        self.last = {}
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _candidates(self, mask):
@@ -98,9 +101,11 @@ class Big2MDPAgent:
         root = self.store.retrieve(feats, cap=self.cap)
         tree = evaluate(self.store, root, depth_max=self.depth_max) if root else {}
 
+        self.last = {"mode": "head", "tree": tree, "root_n": len(root)}
         scored = [(k, a, cards, tree[k]) for k, (a, cards) in cands.items()
                   if k in tree]
         if not scored:
+            self.last["mode"] = "cold"
             return self._cold(cands)
 
         # ── level-4 strategies (priority eq 27: SP → WC → heads) ───────────
@@ -114,8 +119,10 @@ class Big2MDPAgent:
             if len(high) >= len(sets) - 1 and len(low) <= 1:     # SP (eq 26)
                 a = self._play_planned(sets, set_rc, low, cands)
                 if a is not None:
+                    self.last["mode"] = "sp"
                     return a
                 if mask[PASS_IDX] == 1:
+                    self.last["mode"] = "sp-pass"
                     return PASS_IDX                    # protect the series plan
             wc_high = [i for i, r in enumerate(set_rc) if r >= ECOVER["alpha"]]
             wc_low = [i for i, r in enumerate(set_rc) if r <= ECOVER["beta"]]
@@ -124,6 +131,7 @@ class Big2MDPAgent:
                 for i in order:
                     hit = cands.get(action_key(sets[i][1]))
                     if hit is not None:
+                        self.last["mode"] = "wc"
                         return hit[0]
 
         # ── heads ───────────────────────────────────────────────────────────
@@ -149,6 +157,7 @@ class Big2MDPAgent:
                 no_route = all(st.q1 + st.loss <= 0 for *_, st in scored)  # eq 9
             if no_route:
                 _, a, _, _ = max(scored, key=lambda e: e[3].loss)  # least loss
+                self.last["mode"] = "stoploss"
                 return a
 
         return best[1]
