@@ -44,6 +44,7 @@ _最後更新:2026-07-18 深夜 by session `ef4fa0ae`(本檔建立)_
 | 收割 flywheel(belief 訓練資料) | 閒置(master 6,225 局) | AB2 完賽後收割新局;belief 是唯一證實的資料槓桿 |
 | Chip:RL1/RL2 checkpoint 解剖(gate 工具加 history 架構) | 在使用者手上(task_ff36a986) | 使用者點擊;不擋任何線 |
 | Chip:bc_dataset trick 順序疑似 bug | 在使用者手上(task_5f6fae2a) | 使用者點擊 |
+| **Big2MDPLite 規劃器對照臂(`planner/`)** | v0 骨架+8 測試完成(branch `claude/big2mdp-lite`,paper session 建置,現無負責 session) | 本機接 policy_4500 fallback → 事前註冊 gate 判讀 → AB2/AB3 判讀後排程;背景見 `docs/paper/BIG2MDP_METHOD_NOTES.md` |
 
 ## 🅿 停放(有紀錄、暫不動)
 
