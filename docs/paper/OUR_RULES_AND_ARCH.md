@@ -15,7 +15,7 @@
 | A5 | 合法牌型 | 單張、對子、五張(順子/葫蘆/鐵支+1/同花順)。**無三條、無兩對、無同花(flush)** | `rules.md`、`enumerateOptions.py` |
 | A6 | 順子窗 | **恰 10 窗**:3-4-5-6-7 … 10-J-Q-K-A(8 窗)+ A-2-3-4-5 + 2-3-4-5-6;**J-Q-K-A-2 / Q-K-A-2-3 / K-A-2-3-4 不合法** | `value/hand_features.py::STRAIGHT_WINDOWS_RIDX`(import-time assert) |
 | A7 | 順子排序 | A-2-3-4-5 最小 … 10-J-Q-K-A 次大,**2-3-4-5-6 最大**;同窗比最高牌花色 | `rules.md` |
-| A8 | 越級(炸彈) | 鐵支可壓任何當前牌型(除同花順/黑桃2單張);同花順可壓任何(除黑桃2單張);**黑桃 2 單張無敵**(全場必 pass) | `rules.md`、`big2Game.py::returnAvailableActions` |
+| A8 | 越級(炸彈) | 鐵支可壓任何當前牌型(除同花順;場上鐵支需更大鐵支);同花順可壓任何(場上同花順需更大)。**黑桃 2 單張 = 最大單張,但可被鐵支/同花順壓**(無「無敵」特規;2026-08-12 已修正 rules.md 的錯誤記載) | `big2Game.py::returnAvailableActions` 炸彈分支(code 註解:"can beat any hand type, including a single card (e.g. spade 2)") |
 | A9 | Pass 規則 | **能壓也可自願 pass**;pass 後本 trick 鎖定;**連續 3 pass 清 trick**(含伺服器自動 pass) | `big2Game.py`(passedThisRound)、CLAUDE.md 鐵律 |
 | A10 | One-card rule | 下一個「仍活躍」行動者只剩 1 張時,我的單張選項被限制為**只能出最大的合法單張**(領出與跟牌皆適用;只看第一個活躍座位,不掃過緩衝座位) | `big2Game.py::_restrict_singles_for_one_card_rule` |
 | A11 | 基礎計分 | 輸家 = −自己剩牌數;贏家 = 收三家總和 | `big2Game.py::assignRewards` |
@@ -23,7 +23,7 @@
 | A13 | 贏家收尾倍數 | 最後一手是炸彈(鐵支/同花順)→ 全桌 ×2;最後一手含「**主要作用的 2**」→ 再 ×2(可疊成 ×4)。**附帶的 2 不算**:A-2-3-4-5 的 2、葫蘆的對 2、鐵支的 2 kicker | `big2Game.py::_winner_finish_multiplier`(4412/4412 驗證) |
 
 **論文可主張**:這是文獻中未被使用過的規則變體組合(無 flush、繞順 + 2-3-4-5-6 最大、
-黑桃2 無敵、炸彈越級、one-card rule、乘法結算),且以真實商業平台的結算為 ground truth
+炸彈越級、one-card rule、乘法結算含收尾倍數),且以真實商業平台的結算為 ground truth
 逐局驗證——不是自訂簡化規則。各文獻用的變體見 `RELATED_WORK_COMPARISON.md`。
 
 ## B. 模型架構(部署主線:`CardAwareActorCriticHistory`)
