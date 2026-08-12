@@ -81,11 +81,34 @@ def test_partition_covers_hand():
         assert len(sets) == min_plays_to_empty(hand)
 
 
-def test_agent_smoke():
-    from planner.agent import mdplite_action
-    from ppo.eval_baselines import evaluate, smart_action
-    win_rate, avg_score = evaluate(mdplite_action, smart_action, n_games=20)
-    assert 0.0 <= win_rate <= 1.0 and np.isfinite(avg_score)
+def test_big2mdp_selfplay_smoke():
+    from engine.env import Big2Env
+    from planner.big2mdp.agent import Big2MDPAgent
+    from planner.big2mdp.selfplay import play_one_game
+    from planner.big2mdp.store import StatsStore
+
+    store = StatsStore()
+    agents = [Big2MDPAgent(store, level=4) for _ in range(4)]
+    env = Big2Env()
+    for _ in range(15):
+        rewards = play_one_game(env, agents, store)
+        assert abs(float(np.sum(rewards))) < 1e-6      # zero-sum settlement
+    assert store.n_games == 15 and store.n_records > 15 * 20
+
+
+def test_big2mdp_store_roundtrip(tmpdir="/tmp"):
+    import os
+    from planner.big2mdp.store import StatsStore
+    st = StatsStore()
+    feats = (None, 3, 13, (13, 13, 13))
+    st.add_record(feats, (1, "single", 5), won=True, score=9.0, next3pass=True)
+    st.add_record(feats, (1, "single", 5), won=False, score=-4.0, next3pass=False)
+    p = os.path.join(tmpdir, "big2mdp_store_test.pkl")
+    st.save(p)
+    st2 = StatsStore.load(p)
+    s = st2.stats(feats, (1, "single", 5))
+    assert s["n"] == 8 and abs(s["p_win"] - 0.5) < 1e-9 and abs(s["r_c"] - 0.5) < 1e-9
+    os.remove(p)
 
 
 if __name__ == "__main__":

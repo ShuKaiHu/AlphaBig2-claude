@@ -22,8 +22,30 @@ from collections import Counter
 import numpy as np
 
 import gameLogic
-from engine.dominance import bomb_possible, straight_flush_possible, unseen_cards  # noqa: F401 (re-export)
 from value.hand_features import STRAIGHT_WINDOWS_RIDX
+
+# ── self-contained primitives (planner has NO dependency on the deprecated
+# engine/dominance.py or on any legacy model line) ──────────────────────────
+ALL_CARDS = frozenset(range(1, 53))
+
+
+def unseen_cards(my_hand, played):
+    """Cards still in opponents' hands = everything minus mine minus played."""
+    return ALL_CARDS - set(int(c) for c in my_hand) - set(int(c) for c in played)
+
+
+def bomb_possible(unseen) -> bool:
+    cnt = Counter((c - 1) // 4 + 1 for c in unseen)
+    return any(v >= 4 for v in cnt.values())
+
+
+def straight_flush_possible(unseen) -> bool:
+    by_suit = {}
+    for c in unseen:
+        by_suit.setdefault((c - 1) % 4, set()).add((c - 1) // 4 + 1)
+    return any(all(r in ranks for r in seq)
+               for ranks in by_suit.values()
+               for seq in gameLogic._STRAIGHT_SEQUENCES)
 
 _SEQS = gameLogic._STRAIGHT_SEQUENCES  # index = strength order, tuple = rank values 1..13
 
