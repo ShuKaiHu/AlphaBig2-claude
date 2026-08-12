@@ -1,95 +1,147 @@
-"""Statistics store — the replication's version of Big2MDP's N(s,a,s') tables.
+"""Record store — the paper-literal historical state database (v4).
 
-One record per real decision in a finished self-play game:
-  features (lead_key, level, own, opps) + action_key + outcome
-  (won?, final_score) + next3pass (did the next three actors all pass? →
-  the R_c "kept the free-playing right" sample, eq 19-20).
+One record per real DECISION, with a SUCCESSOR POINTER to the same player's
+next decision in the same game — the chains the prediction tree walks
+(eq 1-3: states are rounds; eq 17-18: MP retrieval selects states into the
+tree; the converging-reward recursion follows recorded transitions until
+terminal).
 
-Retrieval follows the paper's MP feature-OR matching (eq 17): a historical
-record is relevant if it shares AT LEAST ONE of: lead_key, level, own count —
-or ALL THREE opponent counts (the eq 17 conjunction clause).
+Columns (parallel arrays, ~40 bytes/record → ~1.2 GB at 500K games):
+  lead_id  : interned id of the combo leading the trick (None → 0 when leading)
+  level    : Table-Card Level (0..49)
+  own      : acting player's card count (1..13)
+  opps_id  : interned id of the (o1,o2,o3) remaining-count tuple
+  akey_id  : interned id of the action key taken (PASS included — an action
+             like any other, per the paper's action set)
+  won      : did this record's player win the game (uint8)
+  score    : the player's final game score (float32; negative on a loss)
+  npass    : how many of the NEXT THREE actors passed (0..3) — the R_c sample
+             of eq 19-20 (K1+K2+K3), stored as a count, not a boolean
+  succ     : record index of the same player's next decision, or -1 (terminal)
 
-ENGINEERING DEVIATION (documented): instead of storing 20M raw records and
-unioning index sets per query, we keep per-feature aggregate tables
-dict[(feature_value, action_key)] → [n, wins, win_score_sum, loss_score_sum,
-next3pass_sum] and SUM the four feature tables' rows at query time. A record
-matching k>1 features is counted k times — a weighted-union approximation of
-the paper's set union (weights = how many features matched, which if anything
-favors more-similar records). Memory stays tiny and queries are O(1).
+Retrieval (eq 17): a record is matched if it shares ≥1 of {lead, level, own}
+with the query — or its FULL opponent-count triple (the conjunction clause).
+The union is capped to the most recent `cap` records (documented tractability
+assumption: the paper never states a retrieval bound).
 """
 import pickle
+from array import array
 from collections import defaultdict
 
 
-def _zeros():
-    return [0, 0, 0.0, 0.0, 0]
-
-
-class StatsStore:
-    FEATS = ("lead", "level", "own", "opps")
-
+class _Intern:
     def __init__(self):
-        self.tables = {f: defaultdict(_zeros) for f in self.FEATS}
+        self.map = {}
+        self.items = []
+
+    def id(self, key):
+        i = self.map.get(key)
+        if i is None:
+            i = len(self.items)
+            self.map[key] = i
+            self.items.append(key)
+        return i
+
+
+class RecordStore:
+    def __init__(self):
+        self.lead = array("i")
+        self.level = array("i")
+        self.own = array("i")
+        self.opps = array("i")
+        self.akey = array("i")
+        self.won = array("b")
+        self.score = array("f")
+        self.npass = array("b")
+        self.succ = array("i")
+        self._leads = _Intern()
+        self._opps = _Intern()
+        self._akeys = _Intern()
+        # per-feature inverted indexes: value -> list of record indices
+        self.ix_lead = defaultdict(lambda: array("i"))
+        self.ix_level = defaultdict(lambda: array("i"))
+        self.ix_own = defaultdict(lambda: array("i"))
+        self.ix_opps = defaultdict(lambda: array("i"))
         self.n_games = 0
-        self.n_records = 0
 
     # ── ingest ──────────────────────────────────────────────────────────────
-    def add_record(self, feats, akey, won, score, next3pass):
-        lead, level, own, opps = feats
-        row_keys = (("lead", (lead, akey)), ("level", (level, akey)),
-                    ("own", (own, akey)), ("opps", (opps, akey)))
-        for tname, key in row_keys:
-            row = self.tables[tname][key]
-            row[0] += 1
-            if won:
-                row[1] += 1
-                row[2] += score
-            else:
-                row[3] += score          # score is negative on a loss
-            row[4] += int(next3pass)
-        self.n_records += 1
+    def __len__(self):
+        return len(self.akey)
 
-    # ── query ───────────────────────────────────────────────────────────────
-    def stats(self, feats, akey):
-        """→ dict(n, p_win, r_win, p_lose, r_lose, r_c) for one candidate
-        action key under MP feature-OR matching; n==0 means no data."""
+    def akey_id(self, akey):
+        return self._akeys.id(akey)
+
+    def akey_of(self, aid):
+        return self._akeys.items[aid]
+
+    def add_record(self, feats, akey, won, score, npass, succ):
         lead, level, own, opps = feats
-        n = wins = 0
-        win_sum = loss_sum = 0.0
-        pass3 = 0
-        for tname, fval in (("lead", lead), ("level", level),
-                            ("own", own), ("opps", opps)):
-            row = self.tables[tname].get((fval, akey))
-            if row:
-                n += row[0]; wins += row[1]
-                win_sum += row[2]; loss_sum += row[3]
-                pass3 += row[4]
-        if n == 0:
-            return dict(n=0, p_win=0.0, r_win=0.0, p_lose=0.0, r_lose=0.0, r_c=0.0)
-        losses = n - wins
-        return dict(
-            n=n,
-            p_win=wins / n,
-            r_win=(win_sum / wins) if wins else 0.0,
-            p_lose=losses / n,
-            r_lose=(loss_sum / losses) if losses else 0.0,
-            r_c=pass3 / n,
-        )
+        i = len(self.akey)
+        lid = self._leads.id(lead)
+        oid = self._opps.id(opps)
+        self.lead.append(lid); self.level.append(level)
+        self.own.append(own); self.opps.append(oid)
+        self.akey.append(self._akeys.id(akey))
+        self.won.append(1 if won else 0)
+        self.score.append(float(score))
+        self.npass.append(int(npass))
+        self.succ.append(int(succ))
+        self.ix_lead[lid].append(i); self.ix_level[level].append(i)
+        self.ix_own[own].append(i); self.ix_opps[oid].append(i)
+        return i
+
+    # ── retrieval (eq 17, feature-OR) ───────────────────────────────────────
+    def retrieve(self, feats, cap=2000):
+        lead, level, own, opps = feats
+        lid = self._leads.map.get(lead)
+        oid = self._opps.map.get(opps)
+        pools = []
+        if lid is not None:
+            pools.append(self.ix_lead[lid])
+        pools.append(self.ix_level.get(level, array("i")))
+        pools.append(self.ix_own.get(own, array("i")))
+        if oid is not None:
+            pools.append(self.ix_opps[oid])
+        per = max(1, cap // max(1, len(pools)))
+        seen = set()
+        for pool in pools:
+            for i in pool[-per:]:
+                seen.add(i)
+        return sorted(seen)
 
     # ── persistence ─────────────────────────────────────────────────────────
     def save(self, path):
         with open(path, "wb") as f:
-            pickle.dump({"tables": {k: dict(v) for k, v in self.tables.items()},
-                         "n_games": self.n_games,
-                         "n_records": self.n_records}, f)
+            pickle.dump({
+                "cols": {k: getattr(self, k).tobytes() for k in
+                         ("lead", "level", "own", "opps", "akey", "won",
+                          "score", "npass", "succ")},
+                "leads": self._leads.items,
+                "opps": self._opps.items,
+                "akeys": self._akeys.items,
+                "n_games": self.n_games,
+            }, f, protocol=4)
 
     @classmethod
     def load(cls, path):
         with open(path, "rb") as f:
             blob = pickle.load(f)
         st = cls()
-        for k, d in blob["tables"].items():
-            st.tables[k] = defaultdict(_zeros, d)
+        types = dict(lead="i", level="i", own="i", opps="i", akey="i",
+                     won="b", score="f", npass="b", succ="i")
+        for k, code in types.items():
+            arr = array(code); arr.frombytes(blob["cols"][k])
+            setattr(st, k, arr)
+        for key in blob["leads"]:
+            st._leads.id(key)
+        for key in blob["opps"]:
+            st._opps.id(key)
+        for key in blob["akeys"]:
+            st._akeys.id(key)
+        for i in range(len(st.akey)):
+            st.ix_lead[st.lead[i]].append(i)
+            st.ix_level[st.level[i]].append(i)
+            st.ix_own[st.own[i]].append(i)
+            st.ix_opps[st.opps[i]].append(i)
         st.n_games = blob["n_games"]
-        st.n_records = blob["n_records"]
         return st

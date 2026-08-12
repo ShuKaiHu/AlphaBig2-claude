@@ -1,31 +1,32 @@
-"""Faithful Big2MDP agent (ToG 2025) on this engine's exact 神來也 rules.
+"""Faithful Big2MDP agent (ToG 2025) — v4, paper-literal decision core.
 
-Plays EVERY move itself — no policy / belief / value nets, no human data, no
-legacy assets. Difficulty levels mirror the paper's app: 1=MDP1.0 (Rookie),
-2=MDP2.0 (Normal), 3=MDP3.0 (Expert), 4=MDP4.0+WP/MP/WC/SP (Master).
+Every decision: retrieve similar historical states (eq 17) → build/evaluate
+the prediction tree (planner/big2mdp/tree.py, eq 3-9) → heads:
 
-v0.3: decision core = ROUTE TREE (planner/big2mdp/tree.py) — the paper's
-converging-reward recursion (eq 4-9) in round abstraction — replacing the
-one-step aggregate scoring that the v0.2 smoke test falsified (marginal
-win-correlations burned bombs/2s early).
+  MDP1.0: argmax q1 (optimistic win value)                       eq 4-6
+  MDP2.0: + S_end (4/4/30); endgame with q1+loss ≤ 0 for ALL
+          actions → least-loss action                            eq 7-9
+  MDP3.0: q1 weighted by W = 1 − d/dmax (d = tree rounds-to-win) eq 10-13
+  MDP4.0: argmax p_win; endgame with p_win = 0 for all → least
+          loss; strategies SP (25-27) and WC (19-24) on the
+          tree's rc means, thresholds at the paper's tuned
+          values; priority SP → WC → heads                       eq 14-16
 
-Heads over route values (p, r_win, r_lose):
-  MDP1.0 (eq 4-6):  Q = p × r_win                       (aggressive only)
-  MDP2.0 (eq 7-9):  + S_end switch (4/4/30): endgame with no winning route →
-                    conservative head max (1−p) × r_lose (stop-loss, dump 2s)
-  MDP3.0 (eq 10-13): aggressive Q scaled by W = 1 − d/dmax (d = sets left)
-  MDP4.0 (eq 14-16): Q = p (pure win-rate route), same S_end switch, plus
-  strategies WC (eq 19-24, .8/.2/.8) and SP (eq 25-27, .8/.1) — priority
-  SP → WC → heads. PASS is scored as "protect the plan": full-hand route
-  probability × a tempo discount (documented approximation).
+PASS is an ordinary action evaluated through the same tree (the paper's
+action set is {Play, Pass}).
+
+Where the paper is silent (documented minimal choices, planner/README.md):
+cold start with no retrievable data → shed the largest-then-lowest legal
+set; retrieval cap / tree depth cap; a partition set absent from the data
+gets rc = 0.
 """
 import numpy as np
 
 import enumerateOptions
+import gameLogic
 from planner.big2mdp.features import PASS_KEY, action_key, state_features, table_level
-from planner.big2mdp.store import StatsStore
-from planner.big2mdp.tree import RoutePlanner
-from planner.control import unseen_cards
+from planner.big2mdp.store import RecordStore
+from planner.big2mdp.tree import evaluate
 from planner.decompose import partition_hand
 
 PASS_IDX = enumerateOptions.passInd
@@ -33,21 +34,16 @@ PASS_IDX = enumerateOptions.passInd
 EEND = dict(alpha=4, beta=4, gamma=30)          # S_end     (Fig 7 tuning)
 ECOVER = dict(alpha=0.8, beta=0.2, gamma=0.8)   # S_cover   (Table III)
 ESERIES = dict(alpha=0.8, beta=0.1)             # S_series  (Table IV)
-PASS_TEMPO = 0.85                               # tempo discount for PASS (doc'd approx)
-
-
-def _rank(c):
-    return (c - 1) // 4 + 1
 
 
 class Big2MDPAgent:
-    def __init__(self, store: StatsStore = None, level: int = 4,
-                 exact_floor: bool = True, min_support: int = 32):
+    def __init__(self, store: RecordStore = None, level: int = 4,
+                 cap: int = 2000, depth_max: int = 8):
         assert level in (1, 2, 3, 4)
-        self.store = store if store is not None else StatsStore()
+        self.store = store if store is not None else RecordStore()
         self.level = level
-        self.planner = RoutePlanner(self.store, exact_floor=exact_floor,
-                                    min_support=min_support)
+        self.cap = cap
+        self.depth_max = depth_max
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _candidates(self, mask):
@@ -55,6 +51,7 @@ class Big2MDPAgent:
         for a in np.flatnonzero(mask == 1):
             a = int(a)
             if a == PASS_IDX:
+                out[PASS_KEY] = (a, [])
                 continue
             cards, _ = enumerateOptions.getOptionNC(a)
             key = action_key(cards)
@@ -63,11 +60,8 @@ class Big2MDPAgent:
                 out[key] = (a, cards)
         return out
 
-    def _send(self, g, me, sets):
-        """S_end (eq 8). |g0| counts the non-single card sets FORMABLE from the
-        hand (paper's reading: combination options, not the partition — a
-        healthy opening hand forms many, so beta=4 only fires late/weak)."""
-        import gameLogic
+    def _send(self, g, me):
+        """S_end (eq 8); |g0| = non-single card sets FORMABLE from the hand."""
         opps = [g.currentHands[p].size for p in range(1, 5) if p != me]
         if min(opps) <= EEND["alpha"] or table_level(g) >= EEND["gamma"]:
             return True
@@ -77,6 +71,16 @@ class Big2MDPAgent:
         n_formable = (0 if isinstance(two, int) else len(two)) + \
                      (0 if isinstance(five, int) else len(five))
         return n_formable <= EEND["beta"]
+
+    @staticmethod
+    def _cold(cands):
+        """Bootstrap when nothing retrievable (paper blank): shed the largest,
+        then lowest-value, legal non-pass set."""
+        plays = [(a, cards) for k, (a, cards) in cands.items() if k is not PASS_KEY]
+        if not plays:
+            return PASS_IDX
+        a, _ = max(plays, key=lambda t: (len(t[1]), -sum(t[1])))
+        return a
 
     # ── decision ────────────────────────────────────────────────────────────
     def __call__(self, env):
@@ -89,45 +93,25 @@ class Big2MDPAgent:
         if legal.size == 1:
             return int(legal[0])
 
-        hand = [int(c) for c in g.currentHands[me]]
         feats = state_features(g, me)
         cands = self._candidates(mask)
-        if not cands:
-            return PASS_IDX
+        root = self.store.retrieve(feats, cap=self.cap)
+        tree = evaluate(self.store, root, depth_max=self.depth_max) if root else {}
 
-        played = [int(c) for c in (np.flatnonzero((g.cardsPlayed != 0).any(axis=0)) + 1)]
-        unseen = unseen_cards(hand, played)
+        scored = [(k, a, cards, tree[k]) for k, (a, cards) in cands.items()
+                  if k in tree]
+        if not scored:
+            return self._cold(cands)
+
+        # ── level-4 strategies (priority eq 27: SP → WC → heads) ───────────
+        hand = [int(c) for c in g.currentHands[me]]
         sets = partition_hand(hand)
-        opp_counts = [g.currentHands[p].size for p in range(1, 5) if p != me]
-        opp_sum = sum(opp_counts)
-        min_opp = min(opp_counts)
-        n_twos = sum(1 for c in hand if _rank(c) == 13)
-
-        # ── route values for every candidate ────────────────────────────────
-        scored = []                                    # (a, cards, p, r_win, r_lose)
-        for key, (a, cards) in cands.items():
-            twos_after = n_twos - sum(1 for c in cards if _rank(c) == 13)
-            p, r_win, r_lose = self.planner.route(
-                hand, feats, unseen, list(cards), opp_sum, twos_after,
-                min_opp=min_opp)
-            scored.append((a, cards, p, r_win, r_lose))
-
-        # full-hand plan probability (used by SP/WC and by PASS's value)
-        set_rc = [self.planner.rc(feats, k, list(cs), unseen) for k, cs in sets]
-        if len(set_rc) > 1:
-            weakest = min(range(len(set_rc)), key=lambda i: set_rc[i])
-            p_plan = 1.0
-            for i, r in enumerate(set_rc):
-                if i != weakest:
-                    p_plan *= r
-        else:
-            p_plan = 1.0
-
-        # ── level-4 strategy overrides (priority eq 27: SP → WC) ───────────
         if self.level == 4 and len(sets) > 1:
+            set_rc = [tree[action_key(cs)].rc if action_key(cs) in tree else 0.0
+                      for _, cs in sets]
             low = [i for i, r in enumerate(set_rc) if r <= ESERIES["beta"]]
             high = [i for i, r in enumerate(set_rc) if r >= ESERIES["alpha"]]
-            if len(high) >= len(sets) - 1 and len(low) <= 1:     # SP
+            if len(high) >= len(sets) - 1 and len(low) <= 1:     # SP (eq 26)
                 a = self._play_planned(sets, set_rc, low, cands)
                 if a is not None:
                     return a
@@ -135,50 +119,39 @@ class Big2MDPAgent:
                     return PASS_IDX                    # protect the series plan
             wc_high = [i for i, r in enumerate(set_rc) if r >= ECOVER["alpha"]]
             wc_low = [i for i, r in enumerate(set_rc) if r <= ECOVER["beta"]]
-            if len(wc_high) >= 2 and len(wc_low) == 1:           # WC
+            if len(wc_high) >= 2 and len(wc_low) == 1:           # WC (eq 22)
                 order = sorted(wc_high, key=lambda i: -set_rc[i])
                 for i in order:
                     hit = cands.get(action_key(sets[i][1]))
                     if hit is not None:
                         return hit[0]
 
-        # ── heads over route values ─────────────────────────────────────────
-        if self.level >= 3:
-            dmax = max(len(partition_hand([c for c in hand if c not in cards])) or 1
-                       for _, cards, *_ in scored) or 1
+        # ── heads ───────────────────────────────────────────────────────────
+        if self.level == 3:
+            ds = [st.d_min for *_, st in scored if st.d_min is not None]
+            dmax = max(ds) if ds else 1
 
         def q_attack(entry):
-            a, cards, p, r_win, _ = entry
-            q = p if self.level == 4 else p * r_win
-            if self.level == 3:
-                rest = [c for c in hand if c not in cards]
-                d = len(partition_hand(rest)) if rest else 0
-                q *= 1.0 - d / max(dmax, 1)
+            _, _, _, st = entry
+            if self.level == 4:
+                return st.p_win                        # eq 14
+            q = st.q1                                  # eq 4
+            if self.level == 3 and st.d_min is not None:
+                q *= 1.0 - st.d_min / max(dmax, 1)     # eq 10-11
             return q
-
-        def q_defend(entry):
-            _, _, p, _, r_lose = entry
-            return (1.0 - p) * r_lose                  # negative; max = least loss
 
         best = max(scored, key=q_attack)
 
-        # PASS as plan protection (only meaningful when following): the value
-        # of not responding = the whole hand's win probability from a
-        # no-control state (regain cost + survival risk priced in by _V).
-        if mask[PASS_IDX] == 1 and g.control == 0:
-            p_pass = self.planner.hand_value(hand, feats, unseen, False, min_opp)
-            if p_pass > best[2]:
-                return PASS_IDX
-
-        if self.level >= 2 and self._send(g, me, sets):
-            # endgame & no winning route worth taking → stop-loss head
-            # (paper: Q ≤ 0 for ALL routes; our priors never hit exactly 0,
-            # so "no route" = best win probability below a small epsilon)
-            if best[2] <= 0.02:
-                a, *_ = max(scored, key=q_defend)
+        if self.level >= 2 and self._send(g, me):
+            if self.level == 4:
+                no_route = all(st.p_win == 0.0 for *_, st in scored)   # eq 16
+            else:
+                no_route = all(st.q1 + st.loss <= 0 for *_, st in scored)  # eq 9
+            if no_route:
+                _, a, _, _ = max(scored, key=lambda e: e[3].loss)  # least loss
                 return a
 
-        return best[0]
+        return best[1]
 
     # ── strategy helpers ────────────────────────────────────────────────────
     def _play_planned(self, sets, set_rc, low, cands):
