@@ -1,49 +1,37 @@
 # planner/ — Big2MDP 忠實復刻(ToG 2025)
 
-> **使用者裁定(2026-08-12)**:完整復刻 Chen & Lu 的 Big2MDP 整隻 agent,
-> **不得使用任何舊資產**(policy/belief/value/AW-BC/人類資料)——agent 全程自己打,
-> 只依賴遊戲引擎規則與自打對局統計。研讀筆記:`docs/paper/BIG2MDP_METHOD_NOTES.md`(PR #5 分支)。
-> 同時裁定:AB2/AB3 線上戰役棄用(見 STATUS.md)。
+> **使用者裁定(2026-08-12)**:完整復刻 Chen & Lu 的 Big2MDP 整隻 agent,**照抄論文、不自行改設計**,
+> 不得使用任何舊資產(policy/belief/value/AW-BC/人類資料)。研讀筆記:`docs/paper/BIG2MDP_METHOD_NOTES.md`。
 
-## 結構
+## 結構(v4,paper-literal)
 
 | 檔案 | 對應論文 | 內容 |
 |---|---|---|
-| `big2mdp/features.py` | eq 17 特徵、2022 §III 牌值 | 四特徵(首出牌組/Table-Card Level/對手剩牌/自家剩牌)、動作抽象鍵 |
-| `big2mdp/store.py` | eq 3, 17-18 | 統計表(N 計數 → P_win/R_win/P_lose/R_lose/R_c),MP 特徵-OR 檢索,存/載 |
-| `big2mdp/agent.py` | eq 4-16, 19-27 | 四個難度(MDP 1.0–4.0)、S_end(4/4/30)、WC(.8/.2/.8)、SP(.8/.1) |
-| `big2mdp/selfplay.py` | 「500K 自打」 | 四座位共用一表的自打填表迴圈 + CLI(斷點續填) |
-| `decompose.py` / `control.py` | SP 的手牌分解 / R_c 精算 | planner 自有元件(非舊資產);control 提供 exact-floor(可 `--no-exact-floor` 關閉走純表) |
-| `test_planner.py` | — | 9 個測試(規則語義 + store roundtrip + 自打煙霧) |
+| `big2mdp/features.py` | eq 17 特徵、2022 §III 牌值 | 四特徵、動作抽象鍵(PASS 是普通動作) |
+| `big2mdp/store.py` | eq 1-3, 17 | **RecordStore**:逐決策原始紀錄 + 同座位後繼鏈(succ)+ npass(0-3,eq 19-20 字面)+ 特徵倒排索引;檢索 = 特徵-OR 聯集 |
+| `big2mdp/tree.py` | eq 3-9, 14-16, 19-20 | **預測樹字面版**:檢索群 → 依動作分群 → 後繼依狀態簽名分支 → 機率 = 出現頻率 → 自家節點取 max → reward 自終局收斂;產出 p_win / q1(max-of-products)/ loss / rc / d_min |
+| `big2mdp/agent.py` | eq 4-16, 19-27 | 四難度 = MDP 1.0-4.0;S_end(4/4/30)、WC(.8/.2/.8)、SP(.8/.1);優先序 SP→WC→頭 |
+| `big2mdp/selfplay.py` | 「500K 自打」 | 共庫自打;每局結束整批入庫(succ 鏈 + npass),玩一場學一場 |
+| `decompose.py` / `control.py` | SP 手牌分解 / 測試輔助 | control 僅供測試與規則驗證,agent 不再使用(v3 的發明已全數移除) |
 
-`big2mdp/data/` 為 gitignored(表是可再生工件)。
+`big2mdp/data/` gitignored。v3 的自創設計(存活折扣、rc 先驗、PASS 特殊定價、exact-floor)已依使用者
+「照抄論文」指示**全部移除**;PASS 經同一棵樹評估(論文動作集 = {Play, Pass})。
 
-## 現況(v0.2,2026-08-12,誠實記錄)
+## 論文沒寫、抄不到的地方(最小假設,全部列出)
 
-- ✅ 管線端到端可跑:39 局/秒(單核)→ **500K 局 ≈ 3.5 小時**,本機可行:
-  `python -m planner.big2mdp.selfplay --games 500000 --level 4 --save planner/big2mdp/data/store_l4.pkl`
-- ⚠️ **已知忠實度缺口(下一個里程碑)**:目前決策核心用「一步聚合統計」選動作;
-  論文的核心是**路線/預測樹**——從當前狀態沿預測的對手動作展開後繼狀態,reward 自終局
-  收斂回來(eq 5-6 的 V/Q 遞迴)。煙霧證據:6k 局表的 MDP4.0 反而輸給冷啟動規則
-  (vs Smart:−3.1 vs −0.1;一步邊際統計把「出 2/炸彈與贏的相關」當因果,提早燒強牌)。
-  加了 min_support 護欄仍不夠 → 缺的是樹,不是資料量。
-- 煙霧數字(300 局,僅供管線健檢,非效果宣稱):cold vs Random 0.69/+16.2、vs Smart 0.21/−0.1;
-  trained(6k) vs Random 0.40/+6.4、vs Smart 0.06/−3.1。
+1. **檢索上限 cap 與樹深 depth_max**:論文無界;但成本隨資料庫成長(2454ms/手是滿庫量測),
+   任何實作都需要邊界。訓練組態 cap=200/depth=5(8.1 局/秒,50 萬場 ≈ 17.5h);
+   部署/評估可放大(論文出手限時 10 秒)。
+2. **冷啟動**(檢索為空):出最大張數中最低值的合法組(論文未載 bootstrap)。
+3. **V_cover/V_series 的 Σ 讀成平均**:eq 21/23/25 字面是對狀態集合求和,與 0.8/0.1 閾值量綱不合,
+   唯一可讀解釋是機率(均值)。
+4. **損失側傳遞**:遞迴中 loss 沿「勝率最大化動作」傳遞(論文未指明)。
+5. **動作以(張數,型,關鍵 rank/窗)抽象**:具體牌組合表會稀疏到查不到;論文的 MP 特徵配對本就在
+   這個粒度運作。
+6. **訓練期組態**:論文未說明訓練局用什麼打(滿樹速度物理上跑不完 50 萬場;
+   庫小時快、庫大時慢——cap 等效於把成本凍結在早期水準)。
 
-## 路線圖
+## 驗證計畫
 
-1. **[下一步] 路線樹**:以 store 的 MP 檢索建 prediction tree(對手動作 → 後繼狀態 → 遞迴到終局),
-   V/Q 按 eq 5-9 收斂;WC/SP 掛在樹值上(V4.0_action = Σ R_c over C(s,a),eq 23)。
-2. 樹完成後重跑訓練曲線(10K/50K/100K/500K),對照論文 Fig 13-14 的爬升形狀驗證忠實度。
-3. 評估(Random/Greedy/Smart 是 Patwa 尺,僅作 yardstick)→ 事前註冊 → 線上。
-
-## 已記錄的實作假設(論文未明定處)
-
-牌值 = rank(1-13) + 花色加值(♣1♦2♥3♠4),level = 累計//10;動作以(張數,型,關鍵 rank/窗)抽象;
-store 用「逐特徵聚合表求和」近似 eq 17 的集合聯集(多特徵吻合的紀錄被多算,權重≈相似度);
-冷啟動 = 出最大張數中最低值的合法組;MDP3.0 的 d = 貪婪分解組數;min_support=32 護欄
-(表大後無作用)。每一條都要在 paper 的 baseline 描述裡如實揭露。
-
-## 紀律
-
-評估宣稱必須事前註冊、走 V0–V3 驗證梯;gate 尺凍結;本 README 的煙霧數字不是結果。
+訓練曲線 = 忠實度主檢驗:10K/50K/100K/500K 存檔點評估勝率是否如論文 Fig 13-14 爬升。
+評估宣稱須事前註冊、走 V0-V3 梯;Random/Greedy/Smart 只是 Patwa 尺(yardstick),不是方法一部分。

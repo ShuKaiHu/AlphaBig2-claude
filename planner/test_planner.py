@@ -85,29 +85,43 @@ def test_big2mdp_selfplay_smoke():
     from engine.env import Big2Env
     from planner.big2mdp.agent import Big2MDPAgent
     from planner.big2mdp.selfplay import play_one_game
-    from planner.big2mdp.store import StatsStore
+    from planner.big2mdp.store import RecordStore
 
-    store = StatsStore()
+    store = RecordStore()
     agents = [Big2MDPAgent(store, level=4) for _ in range(4)]
     env = Big2Env()
     for _ in range(15):
         rewards = play_one_game(env, agents, store)
         assert abs(float(np.sum(rewards))) < 1e-6      # zero-sum settlement
-    assert store.n_games == 15 and store.n_records > 15 * 20
+    assert store.n_games == 15 and len(store) > 15 * 20
+    # successor chains stay within bounds and are strictly forward
+    for i in range(len(store)):
+        s = store.succ[i]
+        assert s == -1 or (i < s < len(store))
 
 
-def test_big2mdp_store_roundtrip(tmpdir="/tmp"):
+def test_big2mdp_store_roundtrip_and_tree(tmpdir="/tmp"):
     import os
-    from planner.big2mdp.store import StatsStore
-    st = StatsStore()
+    from planner.big2mdp.store import RecordStore
+    from planner.big2mdp.tree import evaluate
+
+    st = RecordStore()
     feats = (None, 3, 13, (13, 13, 13))
-    st.add_record(feats, (1, "single", 5), won=True, score=9.0, next3pass=True)
-    st.add_record(feats, (1, "single", 5), won=False, score=-4.0, next3pass=False)
-    p = os.path.join(tmpdir, "big2mdp_store_test.pkl")
+    ak = (1, "single", 13)
+    # two chains: play the 2-single then win next round / lose next round
+    i0 = st.add_record(feats, ak, won=True, score=9.0, npass=3, succ=-1)
+    st.add_record(feats, ak, won=False, score=-4.0, npass=0, succ=-1)
+    st.add_record((None, 4, 12, (13, 13, 12)), ak, won=True, score=9.0,
+                  npass=3, succ=i0)
+    p = os.path.join(tmpdir, "big2mdp_records_test.pkl")
     st.save(p)
-    st2 = StatsStore.load(p)
-    s = st2.stats(feats, (1, "single", 5))
-    assert s["n"] == 8 and abs(s["p_win"] - 0.5) < 1e-9 and abs(s["r_c"] - 0.5) < 1e-9
+    st2 = RecordStore.load(p)
+    assert len(st2) == 3 and st2.succ[2] == i0
+    root = st2.retrieve(feats, cap=100)
+    tree = evaluate(st2, root)
+    assert ak in tree
+    s = tree[ak]
+    assert 0.0 < s.p_win <= 1.0 and s.rc > 0.0
     os.remove(p)
 
 
