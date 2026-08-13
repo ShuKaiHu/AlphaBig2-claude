@@ -27,6 +27,31 @@
 先丟 Club 2,輸時只賠 5 而不是 5×2)。⚠️ 這就是我們 G2 的 last-chance 2-dump 行為,
 他們用一個 if-else 開關實現——對照我們 M3 Phase 1 的 D2-via-RL null,方法論對比極鮮明。
 
+## 2.5 目標函數的心路歷程:為什麼從 max score 一路退到 max win rate(逐字引文)
+
+大老二分數是 **winner-take-all**(1.0 的定義處就寫明:"In Big2, only the winner can earn
+points, while the other three players lose points" — 因此連 1.0 都只計勝利劇本)。演進鏈:
+
+| 轉折 | 病(論文自述) | 藥 |
+|---|---|---|
+| 1.0→2.0 | "weight the chance of a big win as worth risking the loss"(賭徒) | + 輸分項;為免全場保守再加 S_end 開關 |
+| 2.0→3.0 | 分數 reward 不管誰先出完,但遊戲先出完即結束 | 離勝利距離加權 W |
+| 3.0→4.0 | "any route can be intercepted";"the scoring rewards tend to make the MDP choose high-risk routes, which are more likely to be intercepted… may lead to even more points being lost";速度權重誘導囤大組 | **自白**:"we remove the rewards for the fastest winning and scoring, and solely use the probability of the action leading to a player's own victory state" |
+
+**max win rate 如何換回 max score — 論文的分工(消融為證)**:
+E[score] = P(win)×贏量 − P(lose)×輸量,三元件分治 —
+P(win)←WP;輸量←S_end 止損頭;贏量←SP("This approach maximizes the opponent's score
+reduction while increasing the winner's own score")。Fig 8 消融明示分工:**"Although SP has a
+slight impact on win rates, it significantly affects the scores"**(WP/MP/WC 拉勝率、SP 拉分數);
+Fig 11:純分數的 1.0 墊底,4.0 勝率與分數雙冠。思想源頭在 related work:Snakes & Ladders 的
+「最短路 vs 最大勝場」對比 + 麻將多 MDP(單一 reward 過度偏重)。
+
+**評註(我方分析,非論文)**:(a) 分數是無界量,配上他們 max-of-products 樂觀估計 + 頻率表噪音,
+直接 max score 必被大 R 路線騙走;P(win) 有界 [0,1],對噪音穩健——這個選擇部分是配合自家估計器的
+工程妥協。(b) 與本專案缺口分解(勝率通道占 77%)結構同構:兩條獨立路徑得到「大老二分數被勝率通道
+主導、尾部靠止損」同一命題——paper discussion 可用的呼應。(c) 侷限:win-rate max 非 E[score] 完全
+代理(小贏高勝率 vs 大贏低勝率),SP 是啟發式補丁非聯合優化;分解最優性從未被證明,只有經驗消融。
+
 ## 3. MDP 4.0 的三個策略疊層(優先序:SP > WC > win/loss)
 
 - **MP 對手預測**〔(17)(18)〕:Crest = 全牌 − 已出 − 我手;從歷史狀態庫挑「特徵配對」的狀態建預測樹,
